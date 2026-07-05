@@ -67,6 +67,7 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
   bool _isPhaseSubmitting = false;
   String? _workspaceError;
   bool _isVideoGenerating = false;
+  bool _isExplanationGenerating = false;
   bool _stopVideoPolling = false;
   WorkspaceAnimationJobStatus? _latestVideoStatus;
   WorkspaceMediaArtifact? _latestVideoArtifact;
@@ -261,6 +262,7 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     _isAppendingEvent = false;
     _isPhaseSubmitting = false;
     _isVideoGenerating = false;
+    _isExplanationGenerating = false;
     _stopVideoPolling = true;
     _chatEntries.clear();
     _canvasSnapshots.clear();
@@ -1656,6 +1658,89 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     _scrollToBottom();
   }
 
+  Future<void> _generateEduIllustrateExplanation() async {
+    final workspace = _workspace;
+    if (workspace == null || _isLoadingWorkspace || _isExplanationGenerating) {
+      setState(() {
+        _workspaceError = _workspaceMaterial.workspaceNotReadyMessage;
+      });
+      return;
+    }
+
+    final problem = await showDialog<String>(
+      context: context,
+      builder: (context) =>
+          _EduIllustrateProblemDialog(material: _workspaceMaterial),
+    );
+    final problemText = problem?.trim() ?? '';
+    if (problemText.isEmpty) {
+      return;
+    }
+
+    setState(() {
+      _isExplanationGenerating = true;
+      _workspaceError = null;
+      _chatEntries.add(
+        _WorkspaceChatEntry.text(text: problemText, isUser: true),
+      );
+    });
+    _scrollToBottom();
+
+    try {
+      final result = await widget.workspaceRepository.generateExplanation(
+        workspaceId: workspace.id,
+        problem: problemText,
+      );
+      if (!mounted || _workspace?.id != workspace.id) {
+        return;
+      }
+      final arguments = widget.routeArguments;
+      var history = _sessionHistory;
+      if (arguments != null && arguments.isValid) {
+        try {
+          history = await widget.workspaceRepository.fetchSessionHistory(
+            trackId: arguments.trackId,
+            moduleId: arguments.moduleId,
+          );
+        } on WorkspaceException {
+          history = _sessionHistory;
+        }
+      }
+      if (!mounted || _workspace?.id != workspace.id) {
+        return;
+      }
+      setState(() {
+        _workspace = result.workspace;
+        _sessionHistory = history;
+        _chatEntries.add(
+          _WorkspaceChatEntry.text(
+            text: result.explanation.text,
+            isUser: false,
+            isEduIllustrateExplanation: true,
+            eduIllustrateExplanation: result.explanation,
+          ),
+        );
+        _isExplanationGenerating = false;
+      });
+      _scrollToBottom();
+    } on WorkspaceException catch (error) {
+      if (!mounted || _workspace?.id != workspace.id) {
+        return;
+      }
+      setState(() {
+        _isExplanationGenerating = false;
+        _workspaceError = error.message;
+        _chatEntries.add(
+          _WorkspaceChatEntry.text(
+            text: _workspaceMaterial.eduIllustrateFailedMessage(error.message),
+            isUser: false,
+          ),
+        );
+      });
+      _scrollToBottom();
+    }
+  }
+
   Future<void> _appendWorkspaceEvent({
     required String eventType,
     String textPayload = '',
@@ -1735,13 +1820,73 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
           if (event.textPayload.trim().isEmpty) {
             return null;
           }
+          final source = event.metadata['source'];
           return _WorkspaceChatEntry.text(
             text: event.textPayload,
             isUser: event.isLearner,
+            isEduIllustrateExplanation:
+                source == 'eduillustrate_explanation_response',
+            eduIllustrateExplanation:
+                source == 'eduillustrate_explanation_response'
+                ? _eduIllustrateExplanationFromEvent(event)
+                : null,
           );
         })
         .whereType<_WorkspaceChatEntry>()
         .toList(growable: false);
+  }
+
+  WorkspaceEduIllustrateExplanation _eduIllustrateExplanationFromEvent(
+    WorkspaceEvent event,
+  ) {
+    final metadata = event.metadata;
+    return WorkspaceEduIllustrateExplanation(
+      success: true,
+      text: event.textPayload,
+      outputDir: _metadataString(metadata['output_dir']),
+      explanationPath: _metadataNullableString(metadata['explanation_path']),
+      docPath: _metadataNullableString(metadata['doc_path']),
+      assets: _eduIllustrateAssetsFromMetadata(metadata['assets']),
+      timeSeconds: _metadataDouble(metadata['time_seconds']),
+      model: _metadataString(metadata['model']),
+    );
+  }
+
+  List<WorkspaceEduIllustrateAsset> _eduIllustrateAssetsFromMetadata(
+    Object? value,
+  ) {
+    if (value is! List) {
+      return const [];
+    }
+    return value
+        .whereType<Map<String, dynamic>>()
+        .map(
+          (json) => WorkspaceEduIllustrateAsset(
+            kind: _metadataString(json['kind']),
+            url: _metadataString(json['url']),
+            filename: _metadataString(json['filename']),
+            contentType: _metadataNullableString(json['content_type']),
+          ),
+        )
+        .where((asset) => asset.url.isNotEmpty)
+        .toList(growable: false);
+  }
+
+  String _metadataString(Object? value) => value is String ? value : '';
+
+  String? _metadataNullableString(Object? value) {
+    final text = _metadataString(value).trim();
+    return text.isEmpty ? null : text;
+  }
+
+  double _metadataDouble(Object? value) {
+    if (value is num) {
+      return value.toDouble();
+    }
+    if (value is String) {
+      return double.tryParse(value) ?? 0;
+    }
+    return 0;
   }
 
   void _openCanvas() {
@@ -2084,6 +2229,8 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
                                 isLoadingWorkspace: _isLoadingWorkspace,
                                 isAppendingEvent: _isAppendingEvent,
                                 isVideoGenerating: _isVideoGenerating,
+                                isExplanationGenerating:
+                                    _isExplanationGenerating,
                                 workspaceError: _workspaceError,
                                 latestVideoStatus: _latestVideoStatus,
                                 latestVideoArtifact: _latestVideoArtifact,
@@ -2125,11 +2272,17 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
                       onGenerateVideo: () {
                         unawaited(_generateVideo());
                       },
+                      onGenerateExplanation: () {
+                        unawaited(_generateEduIllustrateExplanation());
+                      },
                       canAdvancePhase: canAdvancePhase,
                       canForceAdvancePhase: canForceAdvancePhase,
                       isPhaseSubmitting: _isPhaseSubmitting,
                       isVideoGenerating: _isVideoGenerating,
+                      isExplanationGenerating: _isExplanationGenerating,
                       canGenerateVideo: _canGenerateVideoForCurrentTopic(),
+                      canGenerateExplanation:
+                          workspace != null && !_isLoadingWorkspace,
                       copy: copy,
                       material: material,
                     ),
@@ -2145,14 +2298,24 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
 }
 
 class _WorkspaceChatEntry {
-  const _WorkspaceChatEntry.text({required this.text, required this.isUser})
-    : snapshot = null;
+  const _WorkspaceChatEntry.text({
+    required this.text,
+    required this.isUser,
+    this.isEduIllustrateExplanation = false,
+    this.eduIllustrateExplanation,
+  }) : snapshot = null;
 
-  const _WorkspaceChatEntry.canvas(this.snapshot) : text = null, isUser = true;
+  const _WorkspaceChatEntry.canvas(this.snapshot)
+    : text = null,
+      isUser = true,
+      isEduIllustrateExplanation = false,
+      eduIllustrateExplanation = null;
 
   final String? text;
   final bool isUser;
   final CanvasWorkSnapshot? snapshot;
+  final bool isEduIllustrateExplanation;
+  final WorkspaceEduIllustrateExplanation? eduIllustrateExplanation;
 
   bool get isCanvas => snapshot != null;
 }
@@ -2387,9 +2550,45 @@ class _LocalizedWorkspaceMaterial {
       isIndonesian ? 'Coba buat video lagi' : 'Retry generate video';
   String get generatingVideoButtonLabel =>
       isIndonesian ? 'Membuat video...' : 'Generating video...';
+  String get moreActionsLabel => isIndonesian ? 'Aksi lain' : 'More actions';
   String get generateVideoFromChatLabel => isIndonesian
       ? 'Buat video dari chat ini'
       : 'Generate video from this chat';
+  String get generateExplanationLabel => isIndonesian
+      ? 'Buat penjelasan EduIllustrate'
+      : 'Generate EduIllustrate explanation';
+  String get generatingEduIllustrateButtonLabel =>
+      isIndonesian ? 'Membuat penjelasan...' : 'Generating explanation...';
+  String get generatingEduIllustrateExplanationMessage => isIndonesian
+      ? 'Membuat penjelasan lengkap EduIllustrate...'
+      : 'Generating full EduIllustrate explanation...';
+  String get eduIllustrateExplanationTitle =>
+      isIndonesian ? 'Penjelasan EduIllustrate' : 'EduIllustrate explanation';
+  String get eduIllustrateReaderSubtitle => isIndonesian
+      ? 'Langkah lengkap, diagram, dan media hasil generate.'
+      : 'Full steps, diagrams, and generated media.';
+  String get openEduIllustrateReaderLabel =>
+      isIndonesian ? 'Buka penjelasan' : 'Open explanation';
+  String get eduIllustrateStepsChip =>
+      isIndonesian ? 'Langkah lengkap' : 'Full steps';
+  String eduIllustrateDiagramChip(int count) => isIndonesian
+      ? '$count diagram'
+      : '$count diagram${count == 1 ? '' : 's'}';
+  String eduIllustrateVideoChip(int count) =>
+      isIndonesian ? '$count video' : '$count video${count == 1 ? '' : 's'}';
+  String get imageUnavailable =>
+      isIndonesian ? 'Gambar belum tersedia.' : 'Image unavailable.';
+  String get eduIllustrateProblemDialogTitle =>
+      isIndonesian ? 'Soal untuk EduIllustrate' : 'EduIllustrate problem';
+  String get eduIllustrateProblemFieldLabel =>
+      isIndonesian ? 'Soal atau pertanyaan' : 'Problem or question';
+  String get eduIllustrateProblemHint => isIndonesian
+      ? 'Tulis soal lengkap di sini'
+      : 'Write the full problem here';
+  String get generateLabel => isIndonesian ? 'Generate' : 'Generate';
+  String eduIllustrateFailedMessage(String message) => isIndonesian
+      ? 'Gagal membuat penjelasan EduIllustrate: $message'
+      : 'EduIllustrate explanation failed: $message';
   String get generatingVideoContextMessage => isIndonesian
       ? 'Membuat video dari konteks percakapan terakhirmu...'
       : 'Generating video from your latest conversation context...';
@@ -2575,6 +2774,7 @@ class _WorkspaceChatPanel extends StatelessWidget {
     required this.isLoadingWorkspace,
     required this.isAppendingEvent,
     required this.isVideoGenerating,
+    required this.isExplanationGenerating,
     required this.workspaceError,
     required this.latestVideoStatus,
     required this.latestVideoArtifact,
@@ -2600,6 +2800,7 @@ class _WorkspaceChatPanel extends StatelessWidget {
   final bool isLoadingWorkspace;
   final bool isAppendingEvent;
   final bool isVideoGenerating;
+  final bool isExplanationGenerating;
   final String? workspaceError;
   final WorkspaceAnimationJobStatus? latestVideoStatus;
   final WorkspaceMediaArtifact? latestVideoArtifact;
@@ -2622,9 +2823,7 @@ class _WorkspaceChatPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          SpeechStatusBanner(
-            locale: material.isIndonesian ? 'id-ID' : 'en-US',
-          ),
+          SpeechStatusBanner(locale: material.isIndonesian ? 'id-ID' : 'en-US'),
           // ── Weekly report card (dismissible, shown at top of chat) ────────
           if (weeklyReport != null) ...[
             _WeeklyReportChatCard(
@@ -2669,6 +2868,12 @@ class _WorkspaceChatPanel extends StatelessWidget {
             _WorkspaceSyncNotice(
               icon: Icons.sync_rounded,
               text: material.savingEvidenceMessage,
+            ),
+          ] else if (isExplanationGenerating) ...[
+            const SizedBox(height: 10),
+            _WorkspaceSyncNotice(
+              icon: Icons.auto_awesome_rounded,
+              text: material.generatingEduIllustrateExplanationMessage,
             ),
           ],
           if (videoTemplateHint != null) ...[
@@ -2725,6 +2930,14 @@ class _WorkspaceChatPanel extends StatelessWidget {
                 isUser: true,
                 locale: material.isIndonesian ? 'id-ID' : 'en-US',
               )
+            else if (entry.isEduIllustrateExplanation)
+              _AssistantMessageFrame(
+                child: _EduIllustrateExplanationBubble(
+                  text: entry.text!,
+                  explanation: entry.eduIllustrateExplanation,
+                  material: material,
+                ),
+              )
             else
               _AssistantMessageFrame(
                 child: _WorkspaceBubble(
@@ -2761,6 +2974,82 @@ class _WorkspaceChatPanel extends StatelessWidget {
           ],
         ],
       ),
+    );
+  }
+}
+
+class _EduIllustrateProblemDialog extends StatefulWidget {
+  const _EduIllustrateProblemDialog({required this.material});
+
+  final _LocalizedWorkspaceMaterial material;
+
+  @override
+  State<_EduIllustrateProblemDialog> createState() =>
+      _EduIllustrateProblemDialogState();
+}
+
+class _EduIllustrateProblemDialogState
+    extends State<_EduIllustrateProblemDialog> {
+  final _controller = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    _controller.addListener(_onTextChanged);
+  }
+
+  @override
+  void dispose() {
+    _controller.removeListener(_onTextChanged);
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _onTextChanged() => setState(() {});
+
+  void _submit() {
+    final text = _controller.text.trim();
+    if (text.isEmpty) {
+      return;
+    }
+    Navigator.of(context).pop(text);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final material = widget.material;
+    final canSubmit = _controller.text.trim().isNotEmpty;
+    return AlertDialog(
+      title: Text(material.eduIllustrateProblemDialogTitle),
+      content: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 420),
+        child: TextField(
+          controller: _controller,
+          autofocus: true,
+          minLines: 5,
+          maxLines: 9,
+          keyboardType: TextInputType.multiline,
+          decoration: InputDecoration(
+            labelText: material.eduIllustrateProblemFieldLabel,
+            hintText: material.eduIllustrateProblemHint,
+            alignLabelWithHint: true,
+            filled: true,
+            fillColor: WicaraColors.fieldFill,
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(13)),
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: Text(material.cancelLabel),
+        ),
+        FilledButton.icon(
+          onPressed: canSubmit ? _submit : null,
+          icon: const Icon(Icons.auto_awesome_rounded),
+          label: Text(material.generateLabel),
+        ),
+      ],
     );
   }
 }
@@ -2910,6 +3199,614 @@ class _WorkspaceBubble extends StatelessWidget {
       ),
     );
   }
+}
+
+class _EduIllustrateExplanationBubble extends StatelessWidget {
+  const _EduIllustrateExplanationBubble({
+    required this.text,
+    required this.material,
+    this.explanation,
+  });
+
+  final String text;
+  final _LocalizedWorkspaceMaterial material;
+  final WorkspaceEduIllustrateExplanation? explanation;
+
+  @override
+  Widget build(BuildContext context) {
+    final displayExplanation =
+        explanation ??
+        WorkspaceEduIllustrateExplanation(
+          success: true,
+          text: text,
+          outputDir: '',
+          timeSeconds: 0,
+          model: '',
+        );
+    final imageCount = displayExplanation.assets
+        .where((asset) => asset.kind == 'image')
+        .length;
+    final videoCount = displayExplanation.assets
+        .where((asset) => asset.kind == 'video')
+        .length;
+    final previewUrl = _firstEduIllustrateImageUrl(displayExplanation);
+    final previewText = _eduIllustratePlainPreview(displayExplanation.text);
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: WicaraColors.secondaryLight),
+        boxShadow: [
+          BoxShadow(
+            color: WicaraColors.shadowBlue.withValues(alpha: 0.18),
+            blurRadius: 15,
+            offset: const Offset(0, 9),
+          ),
+        ],
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(
+                  Icons.auto_awesome_rounded,
+                  size: 18,
+                  color: WicaraColors.secondaryDeep,
+                ),
+                const SizedBox(width: 7),
+                Expanded(
+                  child: Text(
+                    material.eduIllustrateExplanationTitle,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      color: WicaraColors.secondaryDeep,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (previewUrl != null) ...[
+              const SizedBox(height: 12),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(12),
+                child: AspectRatio(
+                  aspectRatio: 16 / 9,
+                  child: ColoredBox(
+                    color: const Color(0xFFF6FAFF),
+                    child: Image.network(
+                      previewUrl,
+                      fit: BoxFit.contain,
+                      errorBuilder: (context, error, stackTrace) {
+                        return Center(
+                          child: Icon(
+                            Icons.image_not_supported_outlined,
+                            color: WicaraColors.muted.withValues(alpha: 0.72),
+                          ),
+                        );
+                      },
+                    ),
+                  ),
+                ),
+              ),
+            ],
+            const SizedBox(height: 10),
+            Text(
+              previewText,
+              maxLines: 4,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                color: WicaraColors.text,
+                fontWeight: FontWeight.w600,
+                height: 1.36,
+              ),
+            ),
+            const SizedBox(height: 10),
+            Wrap(
+              spacing: 7,
+              runSpacing: 7,
+              children: [
+                _GeneratedVideoChip(material.eduIllustrateStepsChip),
+                if (imageCount > 0)
+                  _GeneratedVideoChip(
+                    material.eduIllustrateDiagramChip(imageCount),
+                  ),
+                if (videoCount > 0)
+                  _GeneratedVideoChip(
+                    material.eduIllustrateVideoChip(videoCount),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: () {
+                  showModalBottomSheet<void>(
+                    context: context,
+                    isScrollControlled: true,
+                    backgroundColor: Colors.transparent,
+                    builder: (context) {
+                      return _EduIllustrateReaderSheet(
+                        explanation: displayExplanation,
+                        material: material,
+                      );
+                    },
+                  );
+                },
+                icon: const Icon(Icons.open_in_full_rounded),
+                label: Text(material.openEduIllustrateReaderLabel),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _EduIllustrateReaderSheet extends StatelessWidget {
+  const _EduIllustrateReaderSheet({
+    required this.explanation,
+    required this.material,
+  });
+
+  final WorkspaceEduIllustrateExplanation explanation;
+  final _LocalizedWorkspaceMaterial material;
+
+  @override
+  Widget build(BuildContext context) {
+    final locale = material.isIndonesian ? 'id-ID' : 'en-US';
+    final videoAssets = explanation.assets
+        .where((asset) => asset.kind == 'video')
+        .toList(growable: false);
+
+    return SafeArea(
+      child: Align(
+        alignment: Alignment.bottomCenter,
+        child: FractionallySizedBox(
+          heightFactor: 0.92,
+          child: DecoratedBox(
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 14, 8, 10),
+                  child: Row(
+                    children: [
+                      Container(
+                        width: 38,
+                        height: 38,
+                        decoration: BoxDecoration(
+                          color: WicaraColors.secondaryLight.withValues(
+                            alpha: 0.42,
+                          ),
+                          shape: BoxShape.circle,
+                        ),
+                        child: const Icon(
+                          Icons.auto_awesome_rounded,
+                          color: WicaraColors.secondaryDeep,
+                          size: 20,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              material.eduIllustrateExplanationTitle,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.titleMedium
+                                  ?.copyWith(
+                                    color: WicaraColors.ink,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              material.eduIllustrateReaderSubtitle,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.bodySmall
+                                  ?.copyWith(
+                                    color: WicaraColors.muted,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        icon: const Icon(Icons.close_rounded),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1, color: WicaraColors.line),
+                Expanded(
+                  child: ListView(
+                    padding: const EdgeInsets.fromLTRB(18, 16, 18, 24),
+                    children: [
+                      if (videoAssets.isNotEmpty) ...[
+                        _EduIllustrateVideoStrip(
+                          assets: videoAssets,
+                          material: material,
+                        ),
+                        const SizedBox(height: 16),
+                      ],
+                      _EduIllustrateMarkdownReader(
+                        text: explanation.text,
+                        material: material,
+                      ),
+                      const SizedBox(height: 18),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: ReadAloudButton(
+                          textToRead: _eduIllustratePlainPreview(
+                            explanation.text,
+                            maxLength: 5000,
+                          ),
+                          locale: locale,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _EduIllustrateVideoStrip extends StatelessWidget {
+  const _EduIllustrateVideoStrip({
+    required this.assets,
+    required this.material,
+  });
+
+  final List<WorkspaceEduIllustrateAsset> assets;
+  final _LocalizedWorkspaceMaterial material;
+
+  @override
+  Widget build(BuildContext context) {
+    return Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (final asset in assets)
+          FilledButton.icon(
+            onPressed: () {
+              final url = _resolveBackendUrl(asset.url);
+              if (url == null) {
+                return;
+              }
+              showDialog<void>(
+                context: context,
+                builder: (context) {
+                  return _WorkspaceVideoPlayerDialog(
+                    title: asset.filename.isEmpty
+                        ? material.eduIllustrateExplanationTitle
+                        : asset.filename,
+                    videoUrl: url,
+                    material: material,
+                  );
+                },
+              );
+            },
+            icon: const Icon(Icons.play_arrow_rounded),
+            label: Text(material.playGeneratedVideoLabel),
+          ),
+      ],
+    );
+  }
+}
+
+class _EduIllustrateMarkdownReader extends StatelessWidget {
+  const _EduIllustrateMarkdownReader({
+    required this.text,
+    required this.material,
+  });
+
+  final String text;
+  final _LocalizedWorkspaceMaterial material;
+
+  @override
+  Widget build(BuildContext context) {
+    final blocks = _eduIllustrateMarkdownBlocks(text);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final block in blocks) ...[
+          if (block.type == _EduIllustrateMarkdownBlockType.heading)
+            Padding(
+              padding: const EdgeInsets.only(top: 8, bottom: 7),
+              child: Text(
+                block.text,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                  color: WicaraColors.ink,
+                  fontWeight: FontWeight.w800,
+                  height: 1.18,
+                ),
+              ),
+            )
+          else if (block.type == _EduIllustrateMarkdownBlockType.image)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 10),
+              child: _EduIllustrateImageBlock(
+                url: block.url ?? '',
+                altText: block.text,
+                material: material,
+              ),
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.only(bottom: 11),
+              child: RichMathText(
+                _cleanEduIllustrateInlineMarkdown(block.text),
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: WicaraColors.text,
+                  fontWeight: FontWeight.w600,
+                  height: 1.45,
+                ),
+              ),
+            ),
+        ],
+      ],
+    );
+  }
+}
+
+class _EduIllustrateImageBlock extends StatelessWidget {
+  const _EduIllustrateImageBlock({
+    required this.url,
+    required this.altText,
+    required this.material,
+  });
+
+  final String url;
+  final String altText;
+  final _LocalizedWorkspaceMaterial material;
+
+  @override
+  Widget build(BuildContext context) {
+    final resolvedUrl = _resolveBackendUrl(url);
+    if (resolvedUrl == null) {
+      return _EduIllustrateImageFallback(message: material.imageUnavailable);
+    }
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFFF7FAFE),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: WicaraColors.line),
+      ),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(14),
+        child: AspectRatio(
+          aspectRatio: 16 / 9,
+          child: InteractiveViewer(
+            minScale: 1,
+            maxScale: 4,
+            child: Image.network(
+              resolvedUrl,
+              fit: BoxFit.contain,
+              loadingBuilder: (context, child, loadingProgress) {
+                if (loadingProgress == null) {
+                  return child;
+                }
+                return const Center(child: CircularProgressIndicator());
+              },
+              errorBuilder: (context, error, stackTrace) {
+                return _EduIllustrateImageFallback(
+                  message: material.imageUnavailable,
+                );
+              },
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _EduIllustrateImageFallback extends StatelessWidget {
+  const _EduIllustrateImageFallback({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.image_not_supported_outlined,
+              color: WicaraColors.muted.withValues(alpha: 0.72),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: WicaraColors.muted,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+enum _EduIllustrateMarkdownBlockType { heading, paragraph, image }
+
+class _EduIllustrateMarkdownBlock {
+  const _EduIllustrateMarkdownBlock({
+    required this.type,
+    required this.text,
+    this.url,
+  });
+
+  final _EduIllustrateMarkdownBlockType type;
+  final String text;
+  final String? url;
+}
+
+final RegExp _eduIllustrateImageLinePattern = RegExp(
+  r'^!\[([^\]]*)\]\(([^)]+)\)$',
+);
+
+List<_EduIllustrateMarkdownBlock> _eduIllustrateMarkdownBlocks(String source) {
+  final blocks = <_EduIllustrateMarkdownBlock>[];
+  final paragraphLines = <String>[];
+
+  void flushParagraph() {
+    final paragraph = paragraphLines.join('\n').trim();
+    paragraphLines.clear();
+    if (paragraph.isEmpty) {
+      return;
+    }
+    blocks.add(
+      _EduIllustrateMarkdownBlock(
+        type: _EduIllustrateMarkdownBlockType.paragraph,
+        text: paragraph,
+      ),
+    );
+  }
+
+  final normalized = source.replaceAll('\r\n', '\n').replaceAll('\r', '\n');
+  for (final line in normalized.split('\n')) {
+    final trimmed = line.trim();
+    if (trimmed.isEmpty) {
+      flushParagraph();
+      continue;
+    }
+    if (_isEduIllustratePlaceholderTitle(trimmed)) {
+      continue;
+    }
+    final imageMatch = _eduIllustrateImageLinePattern.firstMatch(trimmed);
+    if (imageMatch != null) {
+      flushParagraph();
+      blocks.add(
+        _EduIllustrateMarkdownBlock(
+          type: _EduIllustrateMarkdownBlockType.image,
+          text: imageMatch.group(1)?.trim() ?? '',
+          url: imageMatch.group(2)?.trim(),
+        ),
+      );
+      continue;
+    }
+    final heading = _eduIllustrateHeadingText(trimmed);
+    if (heading != null) {
+      flushParagraph();
+      blocks.add(
+        _EduIllustrateMarkdownBlock(
+          type: _EduIllustrateMarkdownBlockType.heading,
+          text: heading,
+        ),
+      );
+      continue;
+    }
+    paragraphLines.add(trimmed);
+  }
+  flushParagraph();
+  return blocks;
+}
+
+String? _eduIllustrateHeadingText(String line) {
+  if (line.startsWith('#')) {
+    return line.replaceFirst(RegExp(r'^#+\s*'), '').trim();
+  }
+  final boldHeading = RegExp(r'^\*\*(.+?)\*\*:?\s*$').firstMatch(line);
+  final heading = boldHeading?.group(1)?.trim().replaceFirst(RegExp(r':$'), '');
+  if (heading != null && heading.isNotEmpty && heading.length <= 80) {
+    return heading;
+  }
+  return null;
+}
+
+bool _isEduIllustratePlaceholderTitle(String line) {
+  final lower = line.toLowerCase();
+  return lower == '# problem_0_math' || lower == 'problem_0_math';
+}
+
+String _cleanEduIllustrateInlineMarkdown(String text) {
+  return text.replaceAll('`', '').trim();
+}
+
+String _eduIllustratePlainPreview(String source, {int maxLength = 260}) {
+  final text = source
+      .replaceAll(RegExp(r'^!\[[^\]]*\]\([^)]+\)\s*$', multiLine: true), '')
+      .replaceAll(RegExp(r'^#+\s*', multiLine: true), '')
+      .replaceAllMapped(RegExp(r'\*\*(.+?)\*\*'), (match) {
+        return match.group(1) ?? '';
+      })
+      .replaceAll('`', '')
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .trim();
+  final withoutPlaceholder = text
+      .replaceFirst(RegExp(r'^problem_0_math\s*', caseSensitive: false), '')
+      .trim();
+  if (withoutPlaceholder.length <= maxLength) {
+    return withoutPlaceholder;
+  }
+  return '${withoutPlaceholder.substring(0, maxLength).trimRight()}...';
+}
+
+String? _firstEduIllustrateImageUrl(
+  WorkspaceEduIllustrateExplanation explanation,
+) {
+  for (final asset in explanation.assets) {
+    if (asset.kind == 'image') {
+      final url = _resolveBackendUrl(asset.url);
+      if (url != null) {
+        return url;
+      }
+    }
+  }
+  for (final block in _eduIllustrateMarkdownBlocks(explanation.text)) {
+    if (block.type == _EduIllustrateMarkdownBlockType.image) {
+      final url = _resolveBackendUrl(block.url);
+      if (url != null) {
+        return url;
+      }
+    }
+  }
+  return null;
+}
+
+String? _resolveBackendUrl(String? rawUrl) {
+  final text = rawUrl?.trim();
+  if (text == null || text.isEmpty) {
+    return null;
+  }
+  final parsed = Uri.tryParse(text);
+  if (parsed != null && parsed.hasScheme && parsed.host.isNotEmpty) {
+    return text;
+  }
+  final baseUri = Uri.parse(ApiClient.defaultBaseUrl);
+  if (text.startsWith('/')) {
+    return baseUri.resolve(text).toString();
+  }
+  return baseUri.resolve('/$text').toString();
 }
 
 class _AssistantMessageFrame extends StatelessWidget {
@@ -3961,10 +4858,7 @@ class _WorkspaceQuizCard extends StatelessWidget {
           const SizedBox(height: 8),
           Align(
             alignment: Alignment.centerLeft,
-            child: ReadAloudButton(
-              textToRead: quizSpeech,
-              locale: locale,
-            ),
+            child: ReadAloudButton(textToRead: quizSpeech, locale: locale),
           ),
           const SizedBox(height: 12),
           Text(
@@ -4415,11 +5309,14 @@ class _WorkspaceFooter extends StatelessWidget {
     required this.onAdvancePhase,
     required this.onForceAdvancePhase,
     required this.onGenerateVideo,
+    required this.onGenerateExplanation,
     required this.canAdvancePhase,
     required this.canForceAdvancePhase,
     required this.isPhaseSubmitting,
     required this.isVideoGenerating,
+    required this.isExplanationGenerating,
     required this.canGenerateVideo,
+    required this.canGenerateExplanation,
     required this.copy,
     required this.material,
   });
@@ -4429,11 +5326,14 @@ class _WorkspaceFooter extends StatelessWidget {
   final VoidCallback onAdvancePhase;
   final VoidCallback onForceAdvancePhase;
   final VoidCallback onGenerateVideo;
+  final VoidCallback onGenerateExplanation;
   final bool canAdvancePhase;
   final bool canForceAdvancePhase;
   final bool isPhaseSubmitting;
   final bool isVideoGenerating;
+  final bool isExplanationGenerating;
   final bool canGenerateVideo;
+  final bool canGenerateExplanation;
   final OnboardingCopy copy;
   final _LocalizedWorkspaceMaterial material;
 
@@ -4504,21 +5404,44 @@ class _WorkspaceFooter extends StatelessWidget {
                     ),
                   ),
                 ),
-                if (canForceAdvancePhase) ...[
+                if (canForceAdvancePhase || canGenerateExplanation) ...[
                   const SizedBox(width: 8),
                   PopupMenuButton<String>(
-                    tooltip: material.forceAdvancePhaseLabel,
+                    tooltip: material.moreActionsLabel,
                     onSelected: (value) {
                       if (value == 'force') {
                         onForceAdvancePhase();
                       }
+                      if (value == 'generate_explanation') {
+                        onGenerateExplanation();
+                      }
                     },
                     itemBuilder: (context) {
                       return [
-                        PopupMenuItem<String>(
-                          value: 'force',
-                          child: Text(material.forceAdvancePhaseLabel),
-                        ),
+                        if (canGenerateExplanation)
+                          PopupMenuItem<String>(
+                            value: 'generate_explanation',
+                            enabled: !isExplanationGenerating,
+                            child: Row(
+                              children: [
+                                const Icon(Icons.auto_awesome_rounded),
+                                const SizedBox(width: 9),
+                                Expanded(
+                                  child: Text(
+                                    isExplanationGenerating
+                                        ? material
+                                              .generatingEduIllustrateButtonLabel
+                                        : material.generateExplanationLabel,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        if (canForceAdvancePhase)
+                          PopupMenuItem<String>(
+                            value: 'force',
+                            child: Text(material.forceAdvancePhaseLabel),
+                          ),
                       ];
                     },
                     child: const Padding(
