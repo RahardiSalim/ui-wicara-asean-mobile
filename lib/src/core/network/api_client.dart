@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 class ApiClient {
@@ -72,6 +73,7 @@ class ApiClient {
       ..._buildHeaders(includeJsonContentType: true),
       ...?headers,
     };
+    _debugLogPostRequest(uri, body ?? const {});
     final http.Response response;
     try {
       response = await _httpClient
@@ -86,6 +88,7 @@ class ApiClient {
         'Cannot reach the WICARA server at $baseUrl. ${error.message}',
       );
     }
+    _debugLogPostResponse(uri, response);
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
       final (msg, rawDetail) = _errorMessageAndDetail(
@@ -174,6 +177,31 @@ class ApiClient {
       if (_authToken != null) 'Authorization': 'Bearer $_authToken',
     };
   }
+}
+
+void _debugLogPostRequest(Uri uri, Map<String, dynamic> body) {
+  if (!kDebugMode) {
+    return;
+  }
+  debugPrint('[WICARA API] POST $uri');
+  debugPrint('[WICARA API] request body: ${_debugPayload(body)}');
+}
+
+void _debugLogPostResponse(Uri uri, http.Response response) {
+  if (!kDebugMode) {
+    return;
+  }
+  debugPrint('[WICARA API] POST $uri -> ${response.statusCode}');
+  debugPrint('[WICARA API] response body: ${_debugPayload(response.body)}');
+}
+
+String _debugPayload(Object? value) {
+  final text = value is String ? value : jsonEncode(value);
+  const maxLength = 4000;
+  if (text.length <= maxLength) {
+    return text;
+  }
+  return '${text.substring(0, maxLength)}... <truncated ${text.length - maxLength} chars>';
 }
 
 /// Returns (humanMessage, rawDetail) for an error response.
