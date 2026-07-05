@@ -319,6 +319,14 @@ class _UnavailableWorkspaceRepository implements WorkspaceRepository {
   }
 
   @override
+  Future<WorkspaceGenerateExplanationResult> generateExplanation({
+    required String workspaceId,
+    required String problem,
+  }) {
+    throw UnimplementedError('WorkspaceRepository is not configured.');
+  }
+
+  @override
   Future<WorkspaceAnimationJobStatus> getAnimationStatus({
     required String jobId,
   }) {

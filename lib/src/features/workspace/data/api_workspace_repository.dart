@@ -268,6 +268,27 @@ class ApiWorkspaceRepository implements WorkspaceRepository {
   }
 
   @override
+  Future<WorkspaceGenerateExplanationResult> generateExplanation({
+    required String workspaceId,
+    required String problem,
+  }) async {
+    final token = _requireToken();
+    try {
+      final json = await _apiClient.postJson(
+        '/api/v1/workspaces/$workspaceId/generate-explanation',
+        headers: {'Authorization': 'Bearer $token'},
+        body: {'problem': problem},
+        timeout: const Duration(minutes: 15),
+      );
+      final result = generateExplanationResultFromJson(json);
+      _rememberWorkspace(result.workspace);
+      return result;
+    } on ApiClientException catch (error) {
+      throw WorkspaceException(error.message);
+    }
+  }
+
+  @override
   Future<WorkspaceAnimationJobStatus> getAnimationStatus({
     required String jobId,
   }) async {
@@ -403,6 +424,7 @@ class ApiWorkspaceRepository implements WorkspaceRepository {
       parsedBeforeTransition = _briefGreetingPayload(
         phase: phaseState.currentPhase,
         languageCode: responseLanguage.code,
+        topic: _topicForPrompt(workspace),
       );
     } else {
       final requestId =
@@ -435,6 +457,7 @@ class ApiWorkspaceRepository implements WorkspaceRepository {
           languageCode: responseLanguage.code,
           phase: phaseState.currentPhase,
           learnerText: textPayload,
+          topic: _topicForPrompt(workspace),
         ),
         nextPhaseReady: false,
         phaseReasoning: 'anti_repeat_guard_applied',
@@ -623,6 +646,7 @@ Metadata event: ${jsonEncode(metadata)}
   _TutorOverridePayload _briefGreetingPayload({
     required String phase,
     required String? languageCode,
+    required String topic,
   }) {
     final normalized = _string(languageCode).toLowerCase();
     final isIndonesian =
@@ -630,9 +654,10 @@ Metadata event: ${jsonEncode(metadata)}
         normalized == 'id-id' ||
         normalized == 'indonesian' ||
         normalized == 'bahasa-indonesia';
+    final topicText = _cleanTopicForTutorText(topic);
     final text = isIndonesian
-        ? 'Halo, siap. Kamu mau mulai dari mana dulu: variabel, koefisien, atau suku?'
-        : 'Hi, ready to start. Do you want to begin with variables, coefficients, or terms?';
+        ? 'Halo, siap. Kita mulai dari $topicText. Bagian mana yang paling ingin kamu cek dulu?'
+        : 'Hi, ready to start. Let us begin with $topicText. Which part do you want to check first?';
     return _TutorOverridePayload(
       currentPhase: phase,
       text: text,
@@ -709,6 +734,7 @@ Metadata event: ${jsonEncode(metadata)}
     required String? languageCode,
     required String phase,
     required String learnerText,
+    required String topic,
   }) {
     final normalized = _string(languageCode).toLowerCase();
     final isIndonesian =
@@ -716,17 +742,18 @@ Metadata event: ${jsonEncode(metadata)}
         normalized == 'id-id' ||
         normalized == 'indonesian' ||
         normalized == 'bahasa-indonesia';
+    final topicText = _cleanTopicForTutorText(topic);
 
     if (isIndonesian) {
       return switch (phase) {
         'engage' =>
-          'Mantap, kita fokus dari jawabanmu. Menurutmu bagian mana yang paling bikin bingung: variabel, koefisien, atau suku?',
+          'Mantap, kita fokus ke $topicText. Bagian mana yang paling bikin bingung?',
         'explore' =>
-          'Oke, uji cepat: dari ekspresimu, mana suku sejenis yang bisa digabung dan kenapa?',
+          'Oke, uji cepat: sebutkan satu contoh dari $topicText yang menurutmu paling mudah dicek.',
         'explain' =>
           'Bagus. Coba jelaskan lagi dengan kata-katamu sendiri, lalu beri satu contoh singkat.',
         'elaborate' =>
-          'Lanjut latihan: sederhanakan 3x + 2 - x + 5, lalu jelaskan langkahnya singkat.',
+          'Lanjut latihan: terapkan $topicText ke satu kasus baru, lalu jelaskan langkah pertamamu.',
         'evaluate' =>
           'Jawabanmu sudah dicatat. Coba cek lagi bagian yang paling ragu, lalu perbaiki satu langkah.',
         _ =>
@@ -738,13 +765,13 @@ Metadata event: ${jsonEncode(metadata)}
 
     return switch (phase) {
       'engage' =>
-        'Great, let us use your answer directly. Which part feels most confusing: variables, coefficients, or terms?',
+        'Great, let us focus on $topicText. Which part feels most confusing?',
       'explore' =>
-        'Quick check: from your expression, which like terms can be combined, and why?',
+        'Quick check: name one example from $topicText that feels easiest to verify.',
       'explain' =>
         'Nice. Restate the idea in your own words and give one short example.',
       'elaborate' =>
-        'Try this: simplify 3x + 2 - x + 5, then explain your steps briefly.',
+        'Try applying $topicText to one new case, then explain your first step briefly.',
       'evaluate' =>
         'I noted your answer. Recheck the step you are least sure about and revise it once.',
       _ =>
@@ -752,6 +779,14 @@ Metadata event: ${jsonEncode(metadata)}
             ? 'Good point. Add one concrete next step.'
             : 'Good point. Continue from your last step and add one concrete next step.',
     };
+  }
+
+  String _cleanTopicForTutorText(String topic) {
+    final normalized = topic.trim().replaceAll(RegExp(r'\s+'), ' ');
+    if (normalized.isEmpty || normalized == 'this module topic') {
+      return 'this topic';
+    }
+    return normalized;
   }
 
   String _normalizeForRepeat(String text) {
@@ -1163,6 +1198,50 @@ WorkspaceGenerateVideoResult generateVideoResultFromJson(
     event: workspaceEventFromJson(_map(json['event'])),
     workspace: workspaceFromJson(_map(json['workspace'])),
   );
+}
+
+WorkspaceGenerateExplanationResult generateExplanationResultFromJson(
+  Map<String, dynamic> json,
+) {
+  return WorkspaceGenerateExplanationResult(
+    requestEvent: workspaceEventFromJson(_map(json['request_event'])),
+    event: workspaceEventFromJson(_map(json['event'])),
+    explanation: eduIllustrateExplanationFromJson(_map(json['explanation'])),
+    workspace: workspaceFromJson(_map(json['workspace'])),
+  );
+}
+
+WorkspaceEduIllustrateExplanation eduIllustrateExplanationFromJson(
+  Map<String, dynamic> json,
+) {
+  return WorkspaceEduIllustrateExplanation(
+    success: _bool(json['success']),
+    text: _string(json['text']),
+    outputDir: _string(json['output_dir']),
+    assets: _eduIllustrateAssetsFromJson(json['assets']),
+    explanationPath: _nullableString(json['explanation_path']),
+    docPath: _nullableString(json['doc_path']),
+    timeSeconds: _doubleOrNull(json['time_seconds']) ?? 0,
+    model: _string(json['model']),
+  );
+}
+
+List<WorkspaceEduIllustrateAsset> _eduIllustrateAssetsFromJson(Object? value) {
+  if (value is! List) {
+    return const [];
+  }
+  return value
+      .whereType<Map<String, dynamic>>()
+      .map(
+        (json) => WorkspaceEduIllustrateAsset(
+          kind: _string(json['kind']),
+          url: _string(json['url']),
+          filename: _string(json['filename']),
+          contentType: _nullableString(json['content_type']),
+        ),
+      )
+      .where((asset) => asset.url.isNotEmpty)
+      .toList(growable: false);
 }
 
 WorkspaceAnimationQueue workspaceAnimationQueueFromJson(

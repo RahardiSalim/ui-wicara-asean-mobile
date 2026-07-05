@@ -61,6 +61,11 @@ abstract class WorkspaceRepository {
     Map<String, dynamic> metadata = const {},
   });
 
+  Future<WorkspaceGenerateExplanationResult> generateExplanation({
+    required String workspaceId,
+    required String problem,
+  });
+
   Future<WorkspaceAnimationJobStatus> getAnimationStatus({
     required String jobId,
   });

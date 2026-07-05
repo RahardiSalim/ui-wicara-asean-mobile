@@ -225,7 +225,9 @@ void main() {
       await tester.ensureVisible(
         find.text(isLastAnswer ? 'Finish posttest' : 'Continue'),
       );
-      await tester.tap(find.text(isLastAnswer ? 'Finish posttest' : 'Continue'));
+      await tester.tap(
+        find.text(isLastAnswer ? 'Finish posttest' : 'Continue'),
+      );
       await tester.pumpAndSettle();
     }
 
@@ -1168,6 +1170,55 @@ class _FakeWorkspaceRepository implements WorkspaceRepository {
         status: 'queued',
       ),
       event: event,
+      workspace: workspace,
+    );
+  }
+
+  @override
+  Future<WorkspaceGenerateExplanationResult> generateExplanation({
+    required String workspaceId,
+    required String problem,
+  }) async {
+    final requestEvent = WorkspaceEvent(
+      id: 'event-eduillustrate-request',
+      workspaceId: workspaceId,
+      eventIndex: 2,
+      eventType: 'text',
+      actorType: 'learner',
+      textPayload: problem,
+      metadata: const {'source': 'eduillustrate_explanation_request'},
+    );
+    final responseEvent = WorkspaceEvent(
+      id: 'event-eduillustrate-response',
+      workspaceId: workspaceId,
+      eventIndex: 3,
+      eventType: 'text',
+      actorType: 'tutor',
+      textPayload: '# problem_0_math\n\nEduIllustrate explanation.',
+      metadata: const {'source': 'eduillustrate_explanation_response'},
+    );
+    final workspace = WorkspaceSession(
+      id: workspaceId,
+      trackId: 'track-perkalian',
+      moduleId: 'module-perkalian',
+      currentTopic: 'Perkalian',
+      contentMode: 'chat',
+      status: 'active',
+      events: [requestEvent, responseEvent],
+      currentPhase: 'engage',
+      phaseTransitionPending: false,
+      posttestEligible: false,
+    );
+    return WorkspaceGenerateExplanationResult(
+      requestEvent: requestEvent,
+      event: responseEvent,
+      explanation: const WorkspaceEduIllustrateExplanation(
+        success: true,
+        text: '# problem_0_math\n\nEduIllustrate explanation.',
+        outputDir: 'tmp/eduillustrate_outputs/test/problem_0_math',
+        timeSeconds: 1,
+        model: 'fake-eduillustrate-model',
+      ),
       workspace: workspace,
     );
   }

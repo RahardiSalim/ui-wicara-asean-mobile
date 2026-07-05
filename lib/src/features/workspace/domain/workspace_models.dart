@@ -214,6 +214,56 @@ class WorkspaceGenerateVideoResult {
   final WorkspaceSession workspace;
 }
 
+class WorkspaceEduIllustrateExplanation {
+  const WorkspaceEduIllustrateExplanation({
+    required this.success,
+    required this.text,
+    required this.outputDir,
+    required this.timeSeconds,
+    required this.model,
+    this.assets = const [],
+    this.explanationPath,
+    this.docPath,
+  });
+
+  final bool success;
+  final String text;
+  final String outputDir;
+  final List<WorkspaceEduIllustrateAsset> assets;
+  final String? explanationPath;
+  final String? docPath;
+  final double timeSeconds;
+  final String model;
+}
+
+class WorkspaceEduIllustrateAsset {
+  const WorkspaceEduIllustrateAsset({
+    required this.kind,
+    required this.url,
+    required this.filename,
+    this.contentType,
+  });
+
+  final String kind;
+  final String url;
+  final String filename;
+  final String? contentType;
+}
+
+class WorkspaceGenerateExplanationResult {
+  const WorkspaceGenerateExplanationResult({
+    required this.requestEvent,
+    required this.event,
+    required this.explanation,
+    required this.workspace,
+  });
+
+  final WorkspaceEvent requestEvent;
+  final WorkspaceEvent event;
+  final WorkspaceEduIllustrateExplanation explanation;
+  final WorkspaceSession workspace;
+}
+
 class WorkspaceAnimationJobStatus {
   const WorkspaceAnimationJobStatus({
     required this.jobId,
