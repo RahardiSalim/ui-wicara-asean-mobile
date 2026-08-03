@@ -11,7 +11,6 @@ import '../../../core/accessibility/speech_accessibility_scope.dart';
 import '../../../core/theme/wicara_colors.dart';
 import '../../../core/utils/learning_level_resolver.dart';
 import '../../../core/widgets/gradient_button.dart';
-import '../../../core/widgets/hardcoded_video_preview.dart';
 import '../../../core/widgets/language_chip.dart';
 import '../../../core/widgets/speech_controls.dart';
 import '../../auth/application/auth_controller.dart';
@@ -179,9 +178,7 @@ class _AppHomePageState extends State<AppHomePage> {
       return;
     }
     Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => InsightsPage(repository: repo),
-      ),
+      MaterialPageRoute<void>(builder: (_) => InsightsPage(repository: repo)),
     );
   }
 
@@ -583,12 +580,13 @@ class _AppHomePageState extends State<AppHomePage> {
 
     setState(() => _isSubmittingDailyEvaluation = true);
     try {
-      final answerResult = await widget.homeRepository.submitDailyEvaluationAnswer(
-        sessionId: sessionId,
-        questionId: question.id,
-        optionId: optionId,
-        confidence: 6,
-      );
+      final answerResult = await widget.homeRepository
+          .submitDailyEvaluationAnswer(
+            sessionId: sessionId,
+            questionId: question.id,
+            optionId: optionId,
+            confidence: 6,
+          );
       DailyEvaluationResult? evaluationResult;
       final isLastQuestion =
           _dailyEvaluationIndex >= _backendDailyEvaluationQuestions.length - 1;
@@ -1487,10 +1485,7 @@ class _LearningQueue extends StatelessWidget {
                 onContinue: onOpenWorkspace,
               )
             else if (selectedTab == _QueueTab.gallery)
-              _BackendGalleryContent(
-                snapshot: snapshot,
-                onContinue: onOpenWorkspace,
-              ),
+              _BackendGalleryContent(snapshot: snapshot),
           ],
         ),
       ),
@@ -2196,18 +2191,13 @@ String _goalActivityLabel(
 }
 
 class _BackendGalleryContent extends StatelessWidget {
-  const _BackendGalleryContent({
-    required this.snapshot,
-    required this.onContinue,
-  });
+  const _BackendGalleryContent({required this.snapshot});
 
   final HomeSnapshot snapshot;
-  final ValueChanged<WorkspaceRouteArguments> onContinue;
 
   @override
   Widget build(BuildContext context) {
     final copy = _HomeCopyScope.of(context);
-    final videos = _galleryVideosForSnapshot(snapshot);
     final items = snapshot.mediaArtifacts
         .where((item) => item.isReady)
         .toList(growable: false);
@@ -2250,8 +2240,12 @@ class _BackendGalleryContent extends StatelessWidget {
               const SizedBox(height: 13),
               Text(
                 items.isEmpty
-                    ? 'Video demo sudah dipasang langsung dari Supabase untuk kebutuhan presentasi.'
-                    : 'Generated videos from backend jobs are saved here. Demo videos remain available for presentation flows.',
+                    ? (copy.isIndonesian
+                          ? 'Belum ada video yang selesai dibuat.'
+                          : 'No generated videos are ready yet.')
+                    : (copy.isIndonesian
+                          ? 'Video dari job backend tersimpan di sini.'
+                          : 'Videos from backend jobs are saved here.'),
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: WicaraColors.muted,
                   fontWeight: FontWeight.w600,
@@ -2266,177 +2260,7 @@ class _BackendGalleryContent extends StatelessWidget {
           _BackendGalleryArtifactCard(artifact: items[index]),
           const SizedBox(height: 14),
         ],
-        for (var index = 0; index < videos.length; index++) ...[
-          _BackendGalleryVideoCard(
-            video: videos[index],
-            onOpenChat: () => onContinue(videos[index].workspaceTarget),
-          ),
-          if (index < videos.length - 1) const SizedBox(height: 14),
-        ],
       ],
-    );
-  }
-}
-
-class _HardcodedGalleryVideo {
-  const _HardcodedGalleryVideo({
-    required this.id,
-    required this.title,
-    required this.subtitle,
-    required this.durationLabel,
-    required this.videoUrl,
-    required this.workspaceTarget,
-  });
-
-  final String id;
-  final String title;
-  final String subtitle;
-  final String durationLabel;
-  final String videoUrl;
-  final WorkspaceRouteArguments workspaceTarget;
-}
-
-const _hardcodedMultiplicationVideo = _HardcodedGalleryVideo(
-  id: 'perkalian',
-  title: 'Perkalian',
-  subtitle: 'Penjelasan perkalian untuk siswa SD',
-  durationLabel: '04:52',
-  videoUrl:
-      'https://gwbqhirtkgkghnpahtgt.supabase.co/storage/v1/object/public/video/perkalian.mp4',
-  workspaceTarget: WorkspaceRouteArguments(
-    trackId: 'demo-track-sd',
-    moduleId: 'demo-module-perkalian',
-    moduleTitle: 'Perkalian',
-  ),
-);
-
-const _hardcodedAlgebraVideo = _HardcodedGalleryVideo(
-  id: 'aljabar',
-  title: 'Aljabar dan pembuktian Al-Khawarizmi',
-  subtitle: 'Penjelasan aljabar untuk siswa SMP',
-  durationLabel: '06:45',
-  videoUrl:
-      'https://gwbqhirtkgkghnpahtgt.supabase.co/storage/v1/object/public/video/aljabar.mp4',
-  workspaceTarget: WorkspaceRouteArguments(
-    trackId: 'demo-track-smp',
-    moduleId: 'demo-module-aljabar',
-    moduleTitle: 'Aljabar dan pembuktian Al-Khawarizmi',
-  ),
-);
-
-List<_HardcodedGalleryVideo> _galleryVideosForSnapshot(HomeSnapshot snapshot) {
-  final isElementary = _isElementaryProfile(
-    educationLevel: snapshot.educationLevel,
-    gradeLevel: snapshot.gradeLevel,
-  );
-  if (isElementary) {
-    return const [_hardcodedMultiplicationVideo, _hardcodedAlgebraVideo];
-  }
-  return const [_hardcodedAlgebraVideo, _hardcodedMultiplicationVideo];
-}
-
-bool _isElementaryProfile({
-  required String educationLevel,
-  required String gradeLevel,
-}) {
-  return isElementaryLevel(
-    educationLevel: educationLevel,
-    gradeLevel: gradeLevel,
-  );
-}
-
-class _BackendGalleryVideoCard extends StatelessWidget {
-  const _BackendGalleryVideoCard({
-    required this.video,
-    required this.onOpenChat,
-  });
-
-  final _HardcodedGalleryVideo video;
-  final VoidCallback onOpenChat;
-
-  @override
-  Widget build(BuildContext context) {
-    return _Panel(
-      padding: const EdgeInsets.fromLTRB(14, 14, 14, 14),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(12),
-            child: HardcodedVideoPreview(
-              videoUrl: video.videoUrl,
-              title: video.title,
-            ),
-          ),
-          const SizedBox(height: 11),
-          Text(
-            video.title,
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-              fontWeight: FontWeight.w700,
-              color: WicaraColors.ink,
-            ),
-          ),
-          const SizedBox(height: 4),
-          Text(
-            video.subtitle,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: WicaraColors.muted,
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-          const SizedBox(height: 9),
-          Row(
-            children: [
-              _GalleryMetaChip(video.durationLabel),
-              const SizedBox(width: 7),
-              const _GalleryMetaChip('Supabase video'),
-              const Spacer(),
-              TextButton.icon(
-                onPressed: onOpenChat,
-                icon: const Icon(Icons.chat_bubble_outline_rounded, size: 16),
-                label: const Text('Open chat'),
-                style: TextButton.styleFrom(
-                  foregroundColor: WicaraColors.secondary,
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 10,
-                    vertical: 7,
-                  ),
-                  minimumSize: const Size(0, 0),
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _GalleryMetaChip extends StatelessWidget {
-  const _GalleryMetaChip(this.label);
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      height: 24,
-      padding: const EdgeInsets.symmetric(horizontal: 9),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(999),
-        border: Border.all(color: WicaraColors.line),
-      ),
-      alignment: Alignment.center,
-      child: Text(
-        label,
-        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-          color: WicaraColors.muted,
-          fontSize: 10,
-          fontWeight: FontWeight.w700,
-        ),
-      ),
     );
   }
 }
@@ -2458,9 +2282,7 @@ class _BackendGalleryArtifactCard extends StatelessWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(15),
         onTap: () {
-          unawaited(
-            SpeechAccessibilityScope.maybeOf(context)?.stop(),
-          );
+          unawaited(SpeechAccessibilityScope.maybeOf(context)?.stop());
           showDialog<void>(
             context: context,
             builder: (context) {
@@ -3593,10 +3415,11 @@ class _DailyEvaluationQuestionPage extends StatelessWidget {
                           child: Text(
                             question.topic,
                             overflow: TextOverflow.ellipsis,
-                            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                              color: WicaraColors.muted,
-                              fontWeight: FontWeight.w600,
-                            ),
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(
+                                  color: WicaraColors.muted,
+                                  fontWeight: FontWeight.w600,
+                                ),
                           ),
                         ),
                       ),
@@ -4227,10 +4050,7 @@ class _EvaluationCompletePage extends StatelessWidget {
             const SizedBox(height: 12),
             Align(
               alignment: Alignment.center,
-              child: ReadAloudButton(
-                textToRead: resultSpeech,
-                locale: locale,
-              ),
+              child: ReadAloudButton(textToRead: resultSpeech, locale: locale),
             ),
             const SizedBox(height: 26),
             _Panel(
@@ -4304,6 +4124,12 @@ class _PosttestAnalysisPage extends StatelessWidget {
     final copy = _HomeCopyScope.of(context);
     final resolved = result;
     final passed = resolved?.passed ?? false;
+    final progression = resolved?.progression;
+    final progressionMessage = _posttestProgressionMessage(
+      progression: progression,
+      passed: passed,
+      isIndonesian: copy.isIndonesian,
+    );
     final scoreFraction =
         ((resolved?.scorePercent ?? 0).clamp(0, 100).toDouble()) / 100;
     final nodes = resolved?.nodeResults ?? const <PosttestNodeResult>[];
@@ -4318,9 +4144,7 @@ class _PosttestAnalysisPage extends StatelessWidget {
     final locale = copy.isIndonesian ? 'id-ID' : 'en-US';
     final resultSpeech = <String>[
       passed
-          ? (copy.isIndonesian
-                ? 'Mastery terkonfirmasi'
-                : 'Mastery confirmed')
+          ? (copy.isIndonesian ? 'Mastery terkonfirmasi' : 'Mastery confirmed')
           : (copy.isIndonesian
                 ? 'Perlu review dari hasil posttest'
                 : 'Review needed from posttest results'),
@@ -4361,8 +4185,8 @@ class _PosttestAnalysisPage extends StatelessWidget {
             const SizedBox(height: 9),
             Text(
               copy.isIndonesian
-                  ? 'Skor posttest dihitung hanya dari jawaban pilihan ganda.'
-                  : 'Posttest score is calculated from multiple-choice answers only.',
+                  ? 'Ringkasan skor dan keputusan kelanjutan belajar berasal dari backend.'
+                  : 'The score summary and learning progression decision come from the backend.',
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: WicaraColors.muted,
@@ -4373,10 +4197,7 @@ class _PosttestAnalysisPage extends StatelessWidget {
             const SizedBox(height: 12),
             Align(
               alignment: Alignment.center,
-              child: ReadAloudButton(
-                textToRead: resultSpeech,
-                locale: locale,
-              ),
+              child: ReadAloudButton(textToRead: resultSpeech, locale: locale),
             ),
             const SizedBox(height: 26),
             _Panel(
@@ -4403,10 +4224,14 @@ class _PosttestAnalysisPage extends StatelessWidget {
                         ),
                         const SizedBox(height: 17),
                         _EvaluationStat(
-                          value: '70%',
-                          label: copy.isIndonesian
-                              ? 'Batas lulus'
-                              : 'Pass mark',
+                          value: progression?.trackProgressPercent == null
+                              ? (passed ? 'Passed' : 'Review')
+                              : '${progression!.trackProgressPercent}%',
+                          label: progression?.trackProgressPercent == null
+                              ? (copy.isIndonesian ? 'Keputusan' : 'Decision')
+                              : (copy.isIndonesian
+                                    ? 'Progress track'
+                                    : 'Track progress'),
                         ),
                       ],
                     ),
@@ -4433,13 +4258,7 @@ class _PosttestAnalysisPage extends StatelessWidget {
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      passed
-                          ? (copy.isIndonesian
-                                ? 'Skor MCQ agregat sudah melewati 70%. Kamu bisa lanjut ke materi berikutnya.'
-                                : 'Your aggregate MCQ score passed 70%. Continue to the next material.')
-                          : (copy.isIndonesian
-                                ? 'Review area yang lemah dari posttest dan riwayat belajar workspace, lalu coba lagi.'
-                                : 'Review weak areas from the posttest and workspace history, then try again.'),
+                      progressionMessage,
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
                         color: WicaraColors.text,
                         fontWeight: FontWeight.w700,
@@ -4464,6 +4283,40 @@ class _PosttestAnalysisPage extends StatelessWidget {
       ),
     );
   }
+}
+
+String _posttestProgressionMessage({
+  required PosttestProgression? progression,
+  required bool passed,
+  required bool isIndonesian,
+}) {
+  if (passed) {
+    if (progression?.nextModuleId != null) {
+      return isIndonesian
+          ? 'Modul ini selesai dan modul berikutnya sudah dibuka.'
+          : 'This module is complete and the next module is now available.';
+    }
+    if (progression?.goalStatus == 'completed') {
+      return isIndonesian
+          ? 'Target belajar ini sudah diselesaikan.'
+          : 'This learning goal is complete.';
+    }
+    return isIndonesian
+        ? 'Backend mengonfirmasi modul ini lulus. Muat ulang Beranda untuk melihat kelanjutan track.'
+        : 'The backend confirmed this module as passed. Refresh Home to see the next track step.';
+  }
+
+  final phase = progression?.remediationPhase;
+  final reason = progression?.remediationReason;
+  if (phase != null && phase.isNotEmpty) {
+    final detail = reason == null || reason.isEmpty ? '' : ' $reason';
+    return isIndonesian
+        ? 'Sesi dikembalikan ke fase ${phase.toUpperCase()} untuk remediasi.$detail'
+        : 'The session returns to ${phase.toUpperCase()} for remediation.$detail';
+  }
+  return isIndonesian
+      ? 'Backend meminta review area yang masih lemah sebelum mencoba lagi.'
+      : 'The backend requires review of the remaining weak areas before another attempt.';
 }
 
 class _PosttestNodeResultsPanel extends StatelessWidget {
@@ -4569,8 +4422,8 @@ class _PosttestNodeResultRow extends StatelessWidget {
                       ? '${node.correctCount}/${node.totalQuestions} jawaban benar. Target ini lulus.'
                       : '${node.correctCount}/${node.totalQuestions} correct. This target passed.')
                 : (copy.isIndonesian
-                      ? '${node.correctCount}/${node.totalQuestions} jawaban benar. Correctness harus minimal 70%.'
-                      : '${node.correctCount}/${node.totalQuestions} correct. Correctness must be at least 70%.'),
+                      ? '${node.correctCount}/${node.totalQuestions} jawaban benar. Backend menandai konsep ini untuk review.'
+                      : '${node.correctCount}/${node.totalQuestions} correct. The backend marked this concept for review.'),
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: statusColor,
               fontWeight: FontWeight.w700,
@@ -11577,10 +11430,7 @@ class _KnowledgeConceptDetailPanelState
             const SizedBox(height: 12),
             Align(
               alignment: Alignment.centerLeft,
-              child: ReadAloudButton(
-                textToRead: detailSpeech,
-                locale: locale,
-              ),
+              child: ReadAloudButton(textToRead: detailSpeech, locale: locale),
             ),
             const SizedBox(height: 12),
             Container(

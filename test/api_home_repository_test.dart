@@ -183,6 +183,19 @@ void main() {
             'session_id': 'posttest-1',
             'status': 'completed',
             'retake_required_concepts': ['math.multiplication'],
+            'progression': {
+              'passed': false,
+              'track_id': 'track-1',
+              'track_status': 'active',
+              'track_progress_percent': 25,
+              'module_id': 'module-1',
+              'module_status': 'active',
+              'workspace_session_id': 'workspace-1',
+              'workspace_status': 'active',
+              'goal_status': 'in_progress',
+              'remediation_phase': 'explore',
+              'remediation_reason': 'inner derivative still omitted',
+            },
             'node_results': [
               {
                 'concept_id': 'concept-1',
@@ -196,7 +209,7 @@ void main() {
                 'score_percent': 76.67,
                 'confidence_percent': 68,
                 'scaled_score': 7.67,
-                'passed': false,
+                'passed': true,
                 'retake_required': true,
                 'metric_source': 'adaptive_posttest_evidence',
               },
@@ -219,6 +232,9 @@ void main() {
     expect(result.evidencePercent, 76.67);
     expect(result.retakeRequiredConcepts, ['math.multiplication']);
     expect(result.nodeResults.single.retakeRequired, isTrue);
+    expect(result.progression?.moduleStatus, 'active');
+    expect(result.progression?.remediationPhase, 'explore');
+    expect(result.progression?.nextModuleId, isNull);
   });
 }
 
