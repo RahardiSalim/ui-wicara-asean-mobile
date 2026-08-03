@@ -158,7 +158,7 @@ void main() {
     },
   );
 
-  testWidgets('workspace completion opens hardcoded multiplication posttest', (
+  testWidgets('backend-eligible workspace opens backend posttest', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(430, 932);
@@ -186,13 +186,6 @@ void main() {
     expect(find.text('Check understanding'), findsNothing);
 
     await tester.tap(find.text('Start learning chat'));
-    await tester.pumpAndSettle();
-
-    await tester.ensureVisible(find.text('Check understanding'));
-    expect(find.text('Material recap'), findsOneWidget);
-
-    await tester.ensureVisible(find.text('12'));
-    await tester.tap(find.text('12'));
     await tester.pumpAndSettle();
 
     await tester.ensureVisible(find.text('Start Posttest'));
@@ -225,7 +218,9 @@ void main() {
       await tester.ensureVisible(
         find.text(isLastAnswer ? 'Finish posttest' : 'Continue'),
       );
-      await tester.tap(find.text(isLastAnswer ? 'Finish posttest' : 'Continue'));
+      await tester.tap(
+        find.text(isLastAnswer ? 'Finish posttest' : 'Continue'),
+      );
       await tester.pumpAndSettle();
     }
 
@@ -289,7 +284,7 @@ void main() {
     expect(speechController.mode, SpeechMode.idle);
   });
 
-  testWidgets('workspace start posttest warns before module completion', (
+  testWidgets('workspace hides posttest until backend marks it eligible', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(430, 932);
@@ -312,24 +307,7 @@ void main() {
     await tester.tap(find.text('Continue session'));
     await tester.pumpAndSettle();
 
-    await tester.ensureVisible(find.text('Start Posttest'));
-    await tester.tap(find.text('Start Posttest'));
-    await tester.pumpAndSettle();
-
-    expect(
-      find.text(
-        'You have not finished this workspace module. Starting the '
-        'posttest now may skip practice evidence for this concept.',
-      ),
-      findsOneWidget,
-    );
-    expect(find.text('Cancel'), findsOneWidget);
-    expect(find.text('Start posttest'), findsOneWidget);
-
-    await tester.tap(find.text('Start posttest'));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Posttest Perkalian'), findsWidgets);
+    expect(find.text('Start Posttest'), findsNothing);
     expect(
       workspaceRepository.moduleStateUpdates,
       isNot(contains('completed')),
@@ -1220,11 +1198,17 @@ class _FakeWorkspaceRepository implements WorkspaceRepository {
       moduleId: 'module-perkalian',
       currentTopic: 'Perkalian',
       contentMode: 'chat',
-      status: 'active',
+      status: 'completed',
       events: [],
       currentPhase: 'evaluate',
       phaseTransitionPending: false,
-      posttestEligible: true,
+      posttestEligible: false,
+      posttestTrigger: WorkspacePosttestTrigger(
+        status: 'ready',
+        reason: 'module_completed',
+        posttestSessionId: 'posttest-widget-test',
+        questionCount: 10,
+      ),
     );
   }
 }

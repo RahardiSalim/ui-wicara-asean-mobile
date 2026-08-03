@@ -44,6 +44,10 @@ class WorkspaceSession {
     required this.posttestEligible,
     this.currentTopicDescription = '',
     this.learnerLanguage = 'en',
+    this.learningContext = const WorkspaceLearningContext(),
+    this.phaseEvidence = const <String, List<Map<String, dynamic>>>{},
+    this.hintLevel = 0,
+    this.posttestTrigger,
     this.latestMedia,
   });
 
@@ -59,7 +63,72 @@ class WorkspaceSession {
   final String currentPhase;
   final bool phaseTransitionPending;
   final bool posttestEligible;
+  final WorkspaceLearningContext learningContext;
+  final Map<String, List<Map<String, dynamic>>> phaseEvidence;
+  final int hintLevel;
+  final WorkspacePosttestTrigger? posttestTrigger;
   final WorkspaceMediaArtifact? latestMedia;
+}
+
+class WorkspaceLearningContext {
+  const WorkspaceLearningContext({
+    this.originalTargetConceptId,
+    this.originalTargetConceptCode,
+    this.originalTargetLabel = '',
+    this.currentModuleConceptId,
+    this.currentModuleConceptCode,
+    this.currentModuleLabel = '',
+    this.moduleRole = '',
+    this.diagnosisReason = '',
+    this.diagnosisEvidence = const {},
+    this.alreadyUnderstood = const [],
+    this.route = const [],
+    this.returnsToOriginalTarget = false,
+  });
+
+  final String? originalTargetConceptId;
+  final String? originalTargetConceptCode;
+  final String originalTargetLabel;
+  final String? currentModuleConceptId;
+  final String? currentModuleConceptCode;
+  final String currentModuleLabel;
+  final String moduleRole;
+  final String diagnosisReason;
+  final Map<String, dynamic> diagnosisEvidence;
+  final List<Object> alreadyUnderstood;
+  final List<String> route;
+  final bool returnsToOriginalTarget;
+
+  bool get hasDiagnosis =>
+      diagnosisReason.isNotEmpty || diagnosisEvidence.isNotEmpty;
+}
+
+class WorkspacePosttestTrigger {
+  const WorkspacePosttestTrigger({
+    required this.status,
+    this.reason = '',
+    this.learningGoalId,
+    this.trackId,
+    this.moduleId,
+    this.conceptCode,
+    this.conceptTitle = '',
+    this.posttestSessionId,
+    this.questionCount = 0,
+    this.error,
+  });
+
+  final String status;
+  final String reason;
+  final String? learningGoalId;
+  final String? trackId;
+  final String? moduleId;
+  final String? conceptCode;
+  final String conceptTitle;
+  final String? posttestSessionId;
+  final int questionCount;
+  final String? error;
+
+  bool get isReady => status.toLowerCase() == 'ready';
 }
 
 class WorkspaceSessionSummary {
@@ -113,6 +182,14 @@ class WorkspaceTutorResponse {
     required this.nextActions,
     required this.nextPhaseReady,
     this.phaseReasoning,
+    this.evidenceTags = const [],
+    this.correctness = 'unknown',
+    this.misconceptionStatus = 'none',
+    this.confidence = 0,
+    this.evaluationOutcome,
+    this.scaffoldLevel = 0,
+    this.evidenceRequest,
+    this.explanationCard,
   });
 
   final String text;
@@ -120,6 +197,14 @@ class WorkspaceTutorResponse {
   final List<String> nextActions;
   final bool nextPhaseReady;
   final String? phaseReasoning;
+  final List<String> evidenceTags;
+  final String correctness;
+  final String misconceptionStatus;
+  final double confidence;
+  final String? evaluationOutcome;
+  final int scaffoldLevel;
+  final Map<String, dynamic>? evidenceRequest;
+  final Map<String, dynamic>? explanationCard;
 }
 
 class WorkspaceMasteryUpdate {

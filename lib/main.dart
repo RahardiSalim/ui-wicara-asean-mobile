@@ -35,16 +35,8 @@ import 'src/features/workspace/data/workspace_session_store.dart';
 const _googleWebClientId = String.fromEnvironment(
   'WICARA_GOOGLE_WEB_CLIENT_ID',
 );
-const _edgeLiteRtForceLocalForPilot = bool.fromEnvironment(
-  'EDGE_LITERT_FORCE_LOCAL_FOR_PILOT',
-  defaultValue: true,
-);
-const _edgeCloudFallbackAllowed = bool.fromEnvironment(
-  'EDGE_CLOUD_FALLBACK_ALLOWED',
-  defaultValue: false,
-);
-const _edgeDebugRouteTrace = bool.fromEnvironment(
-  'EDGE_DEBUG_ROUTE_TRACE',
+const _offlineLearningEnabled = bool.fromEnvironment(
+  'WICARA_OFFLINE_LEARNING',
   defaultValue: false,
 );
 
@@ -54,10 +46,12 @@ Future<void> main() async {
   final localCurriculumRepository = LocalCurriculumRepository(
     database: localDatabase,
   );
-  await _bootstrapOfflineCurriculum(
-    database: localDatabase,
-    curriculumRepository: localCurriculumRepository,
-  );
+  if (_offlineLearningEnabled) {
+    await _bootstrapOfflineCurriculum(
+      database: localDatabase,
+      curriculumRepository: localCurriculumRepository,
+    );
+  }
   final sessionStore = authSessionStore;
   final pretestStore = pretestSessionStore;
   final workspaceStore = workspaceSessionStore;
@@ -99,12 +93,12 @@ Future<void> main() async {
     sessionStore: sessionStore,
     pretestSessionStore: pretestStore,
   );
-  final CurriculumRepository curriculumRepository =
-      localDatabase.isPlatformSupported
+  final useOfflineLearning =
+      _offlineLearningEnabled && localDatabase.isPlatformSupported;
+  final CurriculumRepository curriculumRepository = useOfflineLearning
       ? localCurriculumRepository
       : ApiCurriculumRepository(apiClient: apiClient);
-  final LearningGoalRepository learningGoalRepository =
-      localDatabase.isPlatformSupported
+  final LearningGoalRepository learningGoalRepository = useOfflineLearning
       ? LocalLearningGoalRepository(
           localCurriculumRepository: localCurriculumRepository,
           pretestSessionStore: pretestStore,
@@ -114,13 +108,13 @@ Future<void> main() async {
           sessionStore: sessionStore,
           pretestSessionStore: pretestStore,
         );
-  final PretestRepository pretestRepository = localDatabase.isPlatformSupported
+  final PretestRepository pretestRepository = useOfflineLearning
       ? LocalPretestRepository(
           localDatabase: localDatabase,
           pretestSessionStore: pretestStore,
           localCurriculumRepository: localCurriculumRepository,
           backendRepository: backendPretestRepository,
-          forceLocalForPilot: _edgeLiteRtForceLocalForPilot,
+          forceLocalForPilot: true,
           allowBackendFallback: false,
         )
       : backendPretestRepository;
@@ -148,9 +142,6 @@ Future<void> main() async {
           apiClient: apiClient,
           sessionStore: sessionStore,
           workspaceSessionStore: workspaceStore,
-          edgeForceLocalForPilot: _edgeLiteRtForceLocalForPilot,
-          edgeCloudFallbackAllowed: _edgeCloudFallbackAllowed,
-          edgeDebugRouteTrace: _edgeDebugRouteTrace,
         ),
       ),
     ),

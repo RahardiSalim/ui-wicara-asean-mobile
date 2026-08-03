@@ -12,10 +12,8 @@ import '../../home/domain/home_repository.dart';
 import '../../home/domain/home_snapshot.dart';
 import '../../onboarding/application/onboarding_controller.dart';
 import '../../onboarding/domain/onboarding_copy.dart';
-import '../../pretest/domain/multiplication_assessment_bank.dart';
 import '../../pretest/presentation/widgets/rich_math_text.dart';
 import '../../pretest/presentation/widgets/fishbone_canvas.dart';
-import '../domain/local_5e_orchestrator.dart';
 import '../domain/workspace_models.dart';
 import '../domain/workspace_repository.dart';
 
@@ -25,8 +23,6 @@ enum _WorkspaceContentMode {
   videoReady,
   videoFailed,
 }
-
-enum _WorkspaceQuizState { unanswered, correct, review }
 
 class WorkspaceModulesPage extends StatefulWidget {
   const WorkspaceModulesPage({
@@ -59,8 +55,6 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
   final List<CanvasWorkSnapshot> _canvasSnapshots = [];
 
   _WorkspaceContentMode _contentMode = _WorkspaceContentMode.choosing;
-  _WorkspaceQuizState _quizState = _WorkspaceQuizState.unanswered;
-  String? _selectedQuizAnswer;
   WorkspaceSession? _workspace;
   bool _isLoadingWorkspace = true;
   bool _isAppendingEvent = false;
@@ -82,18 +76,8 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
   WeeklyLearningReport? _weeklyReport;
   bool _reportCardDismissed = false;
 
-  HardcodedAssessmentPack get _assessmentPack {
-    return HardcodedAssessmentBank.packForEducation(
-      educationLevel: widget.onboardingController.profile.educationLevel,
-      gradeLevel: widget.onboardingController.profile.gradeLevel,
-    );
-  }
-
   _LocalizedWorkspaceMaterial get _workspaceMaterial {
-    return _LocalizedWorkspaceMaterial.fromAssessmentPack(
-      _assessmentPack,
-      languageCode: _normalizedLanguageCode(),
-    );
+    return _LocalizedWorkspaceMaterial.forLanguage(_normalizedLanguageCode());
   }
 
   @override
@@ -265,8 +249,6 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     _chatEntries.clear();
     _canvasSnapshots.clear();
     _contentMode = _WorkspaceContentMode.choosing;
-    _quizState = _WorkspaceQuizState.unanswered;
-    _selectedQuizAnswer = null;
     _latestVideoStatus = null;
     _latestVideoArtifact = null;
     _videoStatusMessage = null;
@@ -325,9 +307,7 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
       return;
     }
 
-    final localPayload = _buildPayloadForWorkspace(workspace);
-    final generationMode = localPayload == null ? 'context_auto' : 'manual';
-    final language = localPayload?.language ?? _resolveGenerationLanguageCode();
+    final language = _normalizedLanguageCode();
     final chatTurnCount = _chatEntries
         .where(
           (entry) =>
@@ -338,8 +318,6 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     setState(() {
       _isVideoGenerating = true;
       _contentMode = _WorkspaceContentMode.videoProcessing;
-      _quizState = _WorkspaceQuizState.unanswered;
-      _selectedQuizAnswer = null;
       _latestVideoStatus = null;
       _videoStatusMessage = _workspaceMaterial.queueingVideoMessage;
       _videoErrorMessage = null;
@@ -349,22 +327,19 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
 
     try {
       debugPrint(
-        '[video-generate] workspace_id=${workspace.id} generation_mode=$generationMode language=$language template_id=${localPayload?.templateId ?? "(auto)"}',
+        '[video-generate] workspace_id=${workspace.id} generation_mode=context_auto language=$language',
       );
       final result = await widget.workspaceRepository.generateVideo(
         workspaceId: workspace.id,
-        generationMode: generationMode,
-        templateId: localPayload?.templateId,
-        specJson: localPayload?.specJson,
+        generationMode: 'context_auto',
         language: language,
         qualityProfile: 'standard',
+        conceptId: workspace.learningContext.currentModuleConceptId,
         metadata: {
           'triggered_by': 'workspace_mid_chat_button',
           'chat_turn_count': chatTurnCount,
           'workspace_content_mode': _contentMode.name,
-          'spec_generation_source': localPayload == null
-              ? 'backend_context_auto'
-              : 'mobile_template_payload_v1',
+          'current_phase': workspace.currentPhase,
         },
       );
 
@@ -470,6 +445,9 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
       if (!mounted) return;
       setState(() {
         _workspace = refreshed;
+        _chatEntries
+          ..clear()
+          ..addAll(_entriesFromEvents(refreshed.events));
         _latestVideoArtifact =
             _withResolvedArtifactUrls(refreshed.latestMedia) ??
             _latestVideoArtifact;
@@ -479,161 +457,7 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     }
   }
 
-  _VideoGenerationPayload? _buildPayloadForWorkspace(
-    WorkspaceSession workspace,
-  ) {
-    final language = _normalizedLanguageCode();
-    final match = _matchTemplateForTopic(workspace.currentTopic);
-    if (match == null) {
-      return null;
-    }
-    final topic = workspace.currentTopic.trim();
-    final title = topic.isEmpty
-        ? (language == 'id' ? 'Penjelasan Konsep' : 'Concept Explanation')
-        : topic;
-
-    final payloadByTemplate = <String, Map<String, dynamic>>{
-      'manim.graph_explanation.v1': _graphExplanationSpec(
-        workspaceId: workspace.id,
-        language: language,
-        title: title,
-      ),
-      'manim.equation_balance.v1': _equationBalanceSpec(
-        workspaceId: workspace.id,
-        language: language,
-        title: title,
-      ),
-      'manim.force_diagram.v1': _forceDiagramSpec(
-        workspaceId: workspace.id,
-        language: language,
-        title: title,
-      ),
-      'manim.fraction_bar_partition.v1': _fractionSpec(
-        workspaceId: workspace.id,
-        language: language,
-        title: title,
-      ),
-      'manim.ratio_proportion.v1': _ratioSpec(
-        workspaceId: workspace.id,
-        language: language,
-        title: title,
-      ),
-      'manim.number_line_quantity.v1': _numberLineSpec(
-        workspaceId: workspace.id,
-        language: language,
-        title: title,
-      ),
-      'manim.sequence_pattern.v1': _sequenceSpec(
-        workspaceId: workspace.id,
-        language: language,
-        title: title,
-      ),
-      'manim.motion_kinematics.v1': _motionSpec(
-        workspaceId: workspace.id,
-        language: language,
-        title: title,
-      ),
-      'manim.geometry_area_volume.v1': _geometrySpec(
-        workspaceId: workspace.id,
-        language: language,
-        title: title,
-      ),
-      'manim.elementary_arithmetic_blocks.v1': _arithmeticSpec(
-        workspaceId: workspace.id,
-        language: language,
-        title: title,
-      ),
-    };
-
-    final specJson = payloadByTemplate[match.templateId];
-    if (specJson == null) {
-      return null;
-    }
-
-    return _VideoGenerationPayload(
-      templateId: match.templateId,
-      language: language,
-      specJson: specJson,
-    );
-  }
-
-  bool _canGenerateVideoForCurrentTopic() {
-    return _workspace != null;
-  }
-
-  String? _videoTemplateHintMessage() {
-    final workspace = _workspace;
-    if (workspace == null) {
-      return null;
-    }
-    final payload = _buildPayloadForWorkspace(workspace);
-    if (payload != null) {
-      return null;
-    }
-    return _workspaceMaterial.isIndonesian
-        ? 'Topik ini belum punya template lokal, jadi video akan pakai context_auto dari backend.'
-        : 'This topic has no local template yet, so video generation falls back to backend context_auto.';
-  }
-
-  _VideoTemplateMatch? _matchTemplateForTopic(String topic) {
-    final normalized = topic.toLowerCase();
-    const mappings = <_VideoTemplateMatch>[
-      _VideoTemplateMatch(
-        templateId: 'manim.equation_balance.v1',
-        keywords: ['persamaan', 'equation', 'aljabar', 'linear'],
-      ),
-      _VideoTemplateMatch(
-        templateId: 'manim.force_diagram.v1',
-        keywords: ['gaya', 'force', 'resultan', 'newton'],
-      ),
-      _VideoTemplateMatch(
-        templateId: 'manim.fraction_bar_partition.v1',
-        keywords: ['pecahan', 'fraction'],
-      ),
-      _VideoTemplateMatch(
-        templateId: 'manim.ratio_proportion.v1',
-        keywords: ['rasio', 'ratio', 'proporsi', 'proportion'],
-      ),
-      _VideoTemplateMatch(
-        templateId: 'manim.number_line_quantity.v1',
-        keywords: [
-          'garis bilangan',
-          'number line',
-          'bilangan bulat',
-          'integer',
-        ],
-      ),
-      _VideoTemplateMatch(
-        templateId: 'manim.sequence_pattern.v1',
-        keywords: ['pola', 'sequence', 'deret'],
-      ),
-      _VideoTemplateMatch(
-        templateId: 'manim.motion_kinematics.v1',
-        keywords: ['gerak', 'kinematics', 'motion', 'kecepatan', 'velocity'],
-      ),
-      _VideoTemplateMatch(
-        templateId: 'manim.geometry_area_volume.v1',
-        keywords: ['luas', 'volume', 'geometri', 'geometry'],
-      ),
-      _VideoTemplateMatch(
-        templateId: 'manim.elementary_arithmetic_blocks.v1',
-        keywords: ['penjumlahan', 'addition', 'aritmetika', 'arithmetic'],
-      ),
-      _VideoTemplateMatch(
-        templateId: 'manim.graph_explanation.v1',
-        keywords: ['grafik', 'graph', 'fungsi', 'function', 'limit', 'turunan'],
-      ),
-    ];
-
-    for (final match in mappings) {
-      for (final keyword in match.keywords) {
-        if (normalized.contains(keyword)) {
-          return match;
-        }
-      }
-    }
-    return null;
-  }
+  bool _canGenerateVideoForCurrentTopic() => _workspace != null;
 
   String _normalizedLanguageCode() {
     final workspaceLanguage = _workspace?.learnerLanguage
@@ -657,720 +481,6 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
       'english' || 'eng' || 'en' || 'en-us' || 'en-gb' => 'en',
       _ => 'en',
     };
-  }
-
-  String _resolveGenerationLanguageCode() {
-    return _normalizedLanguageCode();
-  }
-
-  Map<String, dynamic> _graphExplanationSpec({
-    required String workspaceId,
-    required String language,
-    required String title,
-  }) {
-    final isId = language == 'id';
-    final subtitle = isId
-        ? 'Parabola menunjukkan perubahan nilai fungsi.'
-        : 'A parabola shows how function values change.';
-    final intro = isId
-        ? 'Fungsi kuadrat membentuk parabola. Kita bisa membaca nilai fungsi dari titik pada grafik.'
-        : 'A quadratic function forms a parabola. We can read values from points on the graph.';
-    final step1 = isId
-        ? 'Bentuk parabola. Grafik fungsi kuadrat berbentuk parabola.'
-        : 'Parabola shape. A quadratic function graph is a parabola.';
-    final step2 = isId
-        ? 'Nilai berubah. Saat x berubah, nilai f(x) berubah mengikuti kurva.'
-        : 'Values change. As x changes, f(x) changes along the curve.';
-    final summary = isId
-        ? 'Grafik membantu melihat sifat fungsi secara visual.'
-        : 'A graph helps us understand function behavior visually.';
-
-    return {
-      'id': 'mobile_graph_explanation_$workspaceId',
-      'template_id': 'manim.graph_explanation.v1',
-      'language': language,
-      'title': title,
-      'subtitle': subtitle,
-      'function': {
-        'type': 'quadratic',
-        'params': {'a': 1, 'b': 0, 'c': 0},
-      },
-      'x_range': [-3, 3, 1],
-      'y_range': [-1, 9, 1],
-      'graph_features': [
-        {'type': 'vertex', 'label': isId ? 'Titik puncak' : 'Vertex'},
-        {'type': 'slope', 'label': isId ? 'Kemiringan lokal' : 'Local slope'},
-      ],
-      'highlight_points': [
-        {'x': 1, 'label': 'x = 1'},
-      ],
-      'formula_latex': 'f(x)=x^2',
-      'steps': [
-        {
-          'title': isId ? 'Bentuk parabola' : 'Parabola shape',
-          'body': isId
-              ? 'Grafik fungsi kuadrat berbentuk parabola.'
-              : 'A quadratic graph forms a parabola.',
-          'narration': step1,
-        },
-        {
-          'title': isId ? 'Nilai berubah' : 'Values change',
-          'body': isId
-              ? 'Saat x berubah, nilai f(x) berubah mengikuti kurva.'
-              : 'As x changes, f(x) changes along the curve.',
-          'narration': step2,
-        },
-      ],
-      'summary': summary,
-      'voiceover_script': intro,
-      'intro_narration': intro,
-      'summary_narration': summary,
-      'narration_segments': _segments(
-        intro: intro,
-        step1: step1,
-        step2: step2,
-        summary: summary,
-      ),
-    };
-  }
-
-  Map<String, dynamic> _equationBalanceSpec({
-    required String workspaceId,
-    required String language,
-    required String title,
-  }) {
-    final isId = language == 'id';
-    final intro = isId
-        ? 'Bayangkan persamaan seperti timbangan. Jika satu sisi diubah, sisi lainnya juga harus diubah.'
-        : 'Think of an equation as a balance scale. Any change on one side must also happen on the other side.';
-    final step1 = isId
-        ? 'Jaga seimbang. Setiap operasi harus dilakukan pada kedua ruas.'
-        : 'Keep it balanced. Every operation must be applied on both sides.';
-    final step2 = isId
-        ? 'Isolasi x. Tujuannya membuat x berdiri sendiri.'
-        : 'Isolate x. The goal is to leave x on its own.';
-    final summary = isId
-        ? 'Nilai x ditemukan dengan menjaga kedua ruas tetap setara.'
-        : 'We find x by keeping both sides equivalent.';
-
-    return {
-      'id': 'mobile_equation_balance_$workspaceId',
-      'template_id': 'manim.equation_balance.v1',
-      'language': language,
-      'title': title,
-      'subtitle': isId
-          ? 'Operasi di kiri juga dilakukan di kanan.'
-          : 'Any operation on the left must be done on the right.',
-      'equation': '2x + 3 = 11',
-      'left_expression': '2x + 3',
-      'right_expression': '11',
-      'solution_steps': [
-        {
-          'operation': isId ? 'Kurangi 3' : 'Subtract 3',
-          'value': 3,
-          'left_result': '2x',
-          'right_result': '8',
-          'explanation': isId
-              ? 'Kurangi 3 di kedua sisi.'
-              : 'Subtract 3 on both sides.',
-          'narration': isId
-              ? 'Kurangi tiga di kedua sisi agar persamaan tetap seimbang.'
-              : 'Subtract three from both sides to keep the equation balanced.',
-        },
-        {
-          'operation': isId ? 'Bagi 2' : 'Divide by 2',
-          'value': 2,
-          'left_result': 'x',
-          'right_result': '4',
-          'explanation': isId
-              ? 'Bagi kedua sisi dengan 2.'
-              : 'Divide both sides by 2.',
-          'narration': isId
-              ? 'Bagi kedua sisi dengan dua supaya x berdiri sendiri.'
-              : 'Divide both sides by two so x stands alone.',
-        },
-      ],
-      'final_solution': 'x = 4',
-      'steps': [
-        {
-          'title': isId ? 'Jaga seimbang' : 'Keep balanced',
-          'body': isId
-              ? 'Setiap operasi harus dilakukan pada kedua ruas.'
-              : 'Every operation must be done on both sides.',
-          'narration': step1,
-        },
-        {
-          'title': isId ? 'Isolasi x' : 'Isolate x',
-          'body': isId
-              ? 'Tujuannya membuat x berdiri sendiri.'
-              : 'The goal is to leave x by itself.',
-          'narration': step2,
-        },
-      ],
-      'summary': summary,
-      'voiceover_script': intro,
-      'intro_narration': intro,
-      'summary_narration': summary,
-      'narration_segments': _segments(
-        intro: intro,
-        step1: step1,
-        step2: step2,
-        summary: summary,
-      ),
-    };
-  }
-
-  Map<String, dynamic> _forceDiagramSpec({
-    required String workspaceId,
-    required String language,
-    required String title,
-  }) {
-    final isId = language == 'id';
-    final intro = isId
-        ? 'Kotak mendapat gaya ke kanan dan ke kiri. Karena gaya kanan lebih besar, resultannya ke kanan.'
-        : 'The box has forces to the right and left. Because the right force is larger, the resultant points right.';
-    final step1 = isId
-        ? 'Dua gaya berlawanan. Gaya kanan lebih besar daripada gaya kiri.'
-        : 'Two opposite forces. The right force is larger than the left.';
-    final step2 = isId
-        ? 'Cari selisih. Resultan gaya adalah 6 N ke kanan.'
-        : 'Find the difference. The resultant force is 6 N to the right.';
-    final summary = isId
-        ? 'Arah resultan gaya menentukan kecenderungan gerak benda.'
-        : 'The resultant force direction determines the object motion tendency.';
-
-    return {
-      'id': 'mobile_force_diagram_$workspaceId',
-      'template_id': 'manim.force_diagram.v1',
-      'language': language,
-      'title': title,
-      'subtitle': isId
-          ? 'Gaya berlawanan saling mengurangi.'
-          : 'Opposite forces subtract from each other.',
-      'object': {'type': 'box', 'label': isId ? 'Kotak' : 'Box'},
-      'forces': [
-        {'label': 'F1', 'magnitude': 10, 'unit': 'N', 'direction': 'right'},
-        {'label': 'F2', 'magnitude': 4, 'unit': 'N', 'direction': 'left'},
-      ],
-      'resultant': {'magnitude': 6, 'unit': 'N', 'direction': 'right'},
-      'motion_response': isId
-          ? 'Benda cenderung bergerak ke kanan.'
-          : 'The object tends to move to the right.',
-      'force_scale': 0.25,
-      'steps': [
-        {
-          'title': isId ? 'Dua gaya berlawanan' : 'Two opposite forces',
-          'body': isId
-              ? 'Gaya kanan lebih besar daripada gaya kiri.'
-              : 'The right force is larger than the left force.',
-          'narration': step1,
-        },
-        {
-          'title': isId ? 'Cari selisih' : 'Find the difference',
-          'body': isId
-              ? 'Resultan gaya adalah 6 N ke kanan.'
-              : 'The resultant force is 6 N to the right.',
-          'narration': step2,
-        },
-      ],
-      'summary': summary,
-      'voiceover_script': intro,
-      'intro_narration': intro,
-      'summary_narration': summary,
-      'narration_segments': _segments(
-        intro: intro,
-        step1: step1,
-        step2: step2,
-        summary: summary,
-      ),
-    };
-  }
-
-  Map<String, dynamic> _fractionSpec({
-    required String workspaceId,
-    required String language,
-    required String title,
-  }) {
-    final isId = language == 'id';
-    final intro = isId
-        ? 'Satu per dua dan dua per empat terlihat berbeda, tetapi bagian yang diwarnai sama besar.'
-        : 'One-half and two-fourths look different, but they represent the same shaded part.';
-    final step1 = isId
-        ? 'Lihat bagian berwarna. Setengah bar berwarna pada kedua gambar.'
-        : 'Look at the shaded parts. Half of each bar is shaded.';
-    final step2 = isId
-        ? 'Nilainya sama. 1/2 dan 2/4 menunjukkan bagian yang sama besar.'
-        : 'Same value. 1/2 and 2/4 represent equal portions.';
-    final summary = isId
-        ? 'Pecahan senilai punya nilai sama walau tulisannya berbeda.'
-        : 'Equivalent fractions have the same value even with different forms.';
-
-    return {
-      'id': 'mobile_fraction_$workspaceId',
-      'template_id': 'manim.fraction_bar_partition.v1',
-      'language': language,
-      'title': title,
-      'subtitle': isId
-          ? 'Bagian yang sama bisa ditulis berbeda.'
-          : 'The same part can be written in different ways.',
-      'representations': ['fraction'],
-      'fractions': [
-        {'numerator': 1, 'denominator': 2, 'label': '1/2'},
-        {'numerator': 2, 'denominator': 4, 'label': '2/4'},
-      ],
-      'partition_count': 4,
-      'highlight_parts': [1, 2],
-      'equivalences': [
-        {'left': '1/2', 'right': '2/4'},
-      ],
-      'steps': [
-        {
-          'title': isId ? 'Lihat bagian berwarna' : 'Observe shaded parts',
-          'body': isId
-              ? 'Setengah bar berwarna pada kedua gambar.'
-              : 'Half of the bar is shaded in both figures.',
-          'narration': step1,
-        },
-        {
-          'title': isId ? 'Nilainya sama' : 'Equivalent value',
-          'body': isId
-              ? '1/2 dan 2/4 menunjukkan bagian yang sama besar.'
-              : '1/2 and 2/4 represent the same amount.',
-          'narration': step2,
-        },
-      ],
-      'summary': summary,
-      'voiceover_script': intro,
-      'intro_narration': intro,
-      'summary_narration': summary,
-      'narration_segments': _segments(
-        intro: intro,
-        step1: step1,
-        step2: step2,
-        summary: summary,
-      ),
-    };
-  }
-
-  Map<String, dynamic> _ratioSpec({
-    required String workspaceId,
-    required String language,
-    required String title,
-  }) {
-    final isId = language == 'id';
-    final intro = isId
-        ? 'Rasio dua banding lima berarti dua sendok gula dipasangkan dengan lima gelas air.'
-        : 'A ratio of two to five means two spoonfuls of sugar are paired with five glasses of water.';
-    final step1 = isId
-        ? 'Rasio awal. Gula dan air dibandingkan 2 banding 5.'
-        : 'Initial ratio. Sugar and water are compared as 2 to 5.';
-    final step2 = isId
-        ? 'Skalakan bersama. Jika gula dikali 2, air juga dikali 2.'
-        : 'Scale together. If sugar is multiplied by 2, water must also be multiplied by 2.';
-    final summary = isId
-        ? 'Proporsi terjaga jika kedua kuantitas dikalikan faktor yang sama.'
-        : 'Proportion is preserved when both quantities are scaled by the same factor.';
-
-    return {
-      'id': 'mobile_ratio_$workspaceId',
-      'template_id': 'manim.ratio_proportion.v1',
-      'language': language,
-      'title': title,
-      'subtitle': isId
-          ? 'Rasio menjaga perbandingan dua kuantitas.'
-          : 'Ratios preserve the relationship between two quantities.',
-      'context': isId ? 'Membuat sirup' : 'Making syrup',
-      'quantities': [
-        {
-          'label': isId ? 'Gula' : 'Sugar',
-          'value': 2,
-          'unit': isId ? 'sendok' : 'spoons',
-        },
-        {
-          'label': isId ? 'Air' : 'Water',
-          'value': 5,
-          'unit': isId ? 'gelas' : 'glasses',
-        },
-      ],
-      'ratio_pairs': [
-        [isId ? 'Gula' : 'Sugar', isId ? 'Air' : 'Water'],
-      ],
-      'scale_factor': 2,
-      'scaling_steps': [
-        {
-          'from': '2:5',
-          'to': '4:10',
-          'label': isId ? 'Dikali 2' : 'Multiply by 2',
-        },
-      ],
-      'steps': [
-        {
-          'title': isId ? 'Rasio awal' : 'Initial ratio',
-          'body': isId
-              ? 'Gula dan air dibandingkan 2 banding 5.'
-              : 'Sugar and water are compared as 2 to 5.',
-          'narration': step1,
-        },
-        {
-          'title': isId ? 'Skalakan bersama' : 'Scale together',
-          'body': isId
-              ? 'Jika gula dikali 2, air juga dikali 2.'
-              : 'If sugar doubles, water must also double.',
-          'narration': step2,
-        },
-      ],
-      'summary': summary,
-      'voiceover_script': intro,
-      'intro_narration': intro,
-      'summary_narration': summary,
-      'narration_segments': _segments(
-        intro: intro,
-        step1: step1,
-        step2: step2,
-        summary: summary,
-      ),
-    };
-  }
-
-  Map<String, dynamic> _numberLineSpec({
-    required String workspaceId,
-    required String language,
-    required String title,
-  }) {
-    final isId = language == 'id';
-    final intro = isId
-        ? 'Perhatikan garis bilangan ini. Angka minus tiga berada di kiri, sedangkan angka dua berada di kanan.'
-        : 'Observe this number line. Negative three is on the left while two is on the right.';
-    final step1 = isId
-        ? 'Lihat posisi angka. -3 berada di kiri, sedangkan 2 berada di kanan.'
-        : 'Check positions. -3 is on the left and 2 is on the right.';
-    final step2 = isId
-        ? 'Bandingkan nilainya. Angka yang lebih kanan di garis bilangan bernilai lebih besar.'
-        : 'Compare values. The number farther right is greater.';
-    final summary = isId
-        ? 'Pada garis bilangan, angka di kanan bernilai lebih besar.'
-        : 'On a number line, values on the right are greater.';
-
-    return {
-      'id': 'mobile_number_line_$workspaceId',
-      'template_id': 'manim.number_line_quantity.v1',
-      'language': language,
-      'title': title,
-      'subtitle': isId
-          ? 'Semakin ke kanan, nilainya semakin besar.'
-          : 'The farther right, the greater the value.',
-      'number_range': {'min': -5, 'max': 5, 'step': 1},
-      'markers': [
-        {'value': -3, 'label': '-3'},
-        {'value': 2, 'label': '2'},
-      ],
-      'highlight_values': [-3, 2],
-      'operation': {
-        'type': 'compare',
-        'from': -3,
-        'to': 2,
-        'label': isId ? '2 lebih besar dari -3' : '2 is greater than -3',
-      },
-      'steps': [
-        {
-          'title': isId ? 'Lihat posisi angka' : 'Read the positions',
-          'body': isId
-              ? '-3 berada di kiri, sedangkan 2 berada di kanan.'
-              : '-3 is on the left while 2 is on the right.',
-          'narration': step1,
-        },
-        {
-          'title': isId ? 'Bandingkan nilainya' : 'Compare values',
-          'body': isId
-              ? 'Angka yang lebih kanan bernilai lebih besar.'
-              : 'The value farther right is greater.',
-          'narration': step2,
-        },
-      ],
-      'summary': summary,
-      'voiceover_script': intro,
-      'intro_narration': intro,
-      'summary_narration': summary,
-      'narration_segments': _segments(
-        intro: intro,
-        step1: step1,
-        step2: step2,
-        summary: summary,
-      ),
-    };
-  }
-
-  Map<String, dynamic> _sequenceSpec({
-    required String workspaceId,
-    required String language,
-    required String title,
-  }) {
-    final isId = language == 'id';
-    final intro = isId
-        ? 'Lihat deret dua, empat, enam, delapan. Setiap langkah bertambah dua.'
-        : 'Look at the sequence two, four, six, eight. Each step increases by two.';
-    final step1 = isId
-        ? 'Amati suku. Setiap suku bertambah dua.'
-        : 'Observe terms. Each term increases by two.';
-    final step2 = isId
-        ? 'Terapkan aturan. Suku berikutnya adalah 10.'
-        : 'Apply the rule. The next term is 10.';
-    final summary = isId
-        ? 'Pola dapat diteruskan jika aturan perubahannya diketahui.'
-        : 'A pattern can continue when the change rule is known.';
-
-    return {
-      'id': 'mobile_sequence_$workspaceId',
-      'template_id': 'manim.sequence_pattern.v1',
-      'language': language,
-      'title': title,
-      'subtitle': isId
-          ? 'Cari aturan dari perubahan suku.'
-          : 'Find the rule behind term changes.',
-      'terms': [2, 4, 6, 8],
-      'visual_pattern_type': 'growing_dots',
-      'rule': isId ? 'Tambah 2 setiap langkah' : 'Add 2 each step',
-      'table_values': [
-        {'n': 1, 'value': 2},
-        {'n': 2, 'value': 4},
-        {'n': 3, 'value': 6},
-      ],
-      'target_term': {'n': 5, 'value': 10},
-      'steps': [
-        {
-          'title': isId ? 'Amati suku' : 'Observe terms',
-          'body': isId
-              ? 'Setiap suku bertambah dua.'
-              : 'Each term increases by two.',
-          'narration': step1,
-        },
-        {
-          'title': isId ? 'Terapkan aturan' : 'Apply the rule',
-          'body': isId ? 'Suku berikutnya adalah 10.' : 'The next term is 10.',
-          'narration': step2,
-        },
-      ],
-      'summary': summary,
-      'voiceover_script': intro,
-      'intro_narration': intro,
-      'summary_narration': summary,
-      'narration_segments': _segments(
-        intro: intro,
-        step1: step1,
-        step2: step2,
-        summary: summary,
-      ),
-    };
-  }
-
-  Map<String, dynamic> _motionSpec({
-    required String workspaceId,
-    required String language,
-    required String title,
-  }) {
-    final isId = language == 'id';
-    final intro = isId
-        ? 'Pada gerak lurus beraturan, posisi bertambah secara teratur setiap waktu.'
-        : 'In uniform linear motion, position increases regularly over time.';
-    final step1 = isId
-        ? 'Kecepatan tetap. Benda menempuh jarak yang sama tiap detik.'
-        : 'Constant speed. The object travels equal distances each second.';
-    final step2 = isId
-        ? 'Grafik lurus. Posisi terhadap waktu membentuk garis lurus.'
-        : 'Straight graph. Position versus time forms a straight line.';
-    final summary = isId
-        ? 'GLB memiliki kecepatan tetap dan percepatan nol.'
-        : 'Uniform motion has constant speed and zero acceleration.';
-
-    return {
-      'id': 'mobile_motion_$workspaceId',
-      'template_id': 'manim.motion_kinematics.v1',
-      'language': language,
-      'title': title,
-      'subtitle': isId
-          ? 'Posisi bertambah sama setiap selang waktu.'
-          : 'Position increases equally at each time interval.',
-      'scenario': isId ? 'Gerak lurus beraturan' : 'Uniform linear motion',
-      'time_points': [0, 1, 2, 3, 4],
-      'position_data': [0, 2, 4, 6, 8],
-      'velocity_data': [2, 2, 2, 2, 2],
-      'acceleration': 0,
-      'graph_type': 'position_time',
-      'steps': [
-        {
-          'title': isId ? 'Kecepatan tetap' : 'Constant speed',
-          'body': isId
-              ? 'Benda menempuh jarak yang sama tiap detik.'
-              : 'The object travels equal distance each second.',
-          'narration': step1,
-        },
-        {
-          'title': isId ? 'Grafik lurus' : 'Straight graph',
-          'body': isId
-              ? 'Posisi terhadap waktu membentuk garis lurus.'
-              : 'Position versus time forms a straight line.',
-          'narration': step2,
-        },
-      ],
-      'summary': summary,
-      'voiceover_script': intro,
-      'intro_narration': intro,
-      'summary_narration': summary,
-      'narration_segments': _segments(
-        intro: intro,
-        step1: step1,
-        step2: step2,
-        summary: summary,
-      ),
-    };
-  }
-
-  Map<String, dynamic> _geometrySpec({
-    required String workspaceId,
-    required String language,
-    required String title,
-  }) {
-    final isId = language == 'id';
-    final intro = isId
-        ? 'Untuk mencari luas persegi panjang, kita melihat panjang dan lebarnya.'
-        : 'To find the area of a rectangle, we look at its length and width.';
-    final step1 = isId
-        ? 'Ukur dua sisi. Persegi panjang punya panjang dan lebar.'
-        : 'Measure two sides. A rectangle has length and width.';
-    final step2 = isId
-        ? 'Kalikan. Luas diperoleh dari panjang dikali lebar.'
-        : 'Multiply. Area equals length times width.';
-    final summary = isId
-        ? 'Luas persegi panjang adalah panjang dikali lebar.'
-        : 'Rectangle area is length multiplied by width.';
-
-    return {
-      'id': 'mobile_geometry_$workspaceId',
-      'template_id': 'manim.geometry_area_volume.v1',
-      'language': language,
-      'title': title,
-      'subtitle': isId
-          ? 'Luas dapat dihitung dari panjang dan lebar.'
-          : 'Area can be computed from length and width.',
-      'shape_type': 'rectangle',
-      'dimensions': {'length': 6, 'width': 4, 'unit': isId ? 'cm' : 'cm'},
-      'transformations': [
-        {
-          'type': 'fill_unit_squares',
-          'label': isId
-              ? 'Isi dengan persegi satuan'
-              : 'Fill with unit squares',
-        },
-      ],
-      'formula_latex': 'L = p \\times l',
-      'highlight_features': ['length', 'width', 'area'],
-      'steps': [
-        {
-          'title': isId ? 'Ukur dua sisi' : 'Measure two sides',
-          'body': isId
-              ? 'Persegi panjang punya panjang dan lebar.'
-              : 'A rectangle has length and width.',
-          'narration': step1,
-        },
-        {
-          'title': isId ? 'Kalikan' : 'Multiply',
-          'body': isId
-              ? 'Luas diperoleh dari panjang dikali lebar.'
-              : 'Area comes from length times width.',
-          'narration': step2,
-        },
-      ],
-      'summary': summary,
-      'voiceover_script': intro,
-      'intro_narration': intro,
-      'summary_narration': summary,
-      'narration_segments': _segments(
-        intro: intro,
-        step1: step1,
-        step2: step2,
-        summary: summary,
-      ),
-    };
-  }
-
-  Map<String, dynamic> _arithmeticSpec({
-    required String workspaceId,
-    required String language,
-    required String title,
-  }) {
-    final isId = language == 'id';
-    final intro = isId
-        ? 'Kita punya dua kelompok blok. Saat digabung, semua blok dihitung bersama.'
-        : 'We have two groups of blocks. When combined, all blocks are counted together.';
-    final step1 = isId
-        ? 'Ada dua kelompok. Kelompok pertama berisi 12, kelompok kedua berisi 8.'
-        : 'There are two groups. The first has 12 and the second has 8.';
-    final step2 = isId
-        ? 'Gabungkan. Setelah digabung, jumlahnya menjadi 20.'
-        : 'Combine them. After combining, the total is 20.';
-    final summary = isId
-        ? 'Penjumlahan berarti menggabungkan dua kelompok.'
-        : 'Addition means combining two groups.';
-
-    return {
-      'id': 'mobile_arithmetic_$workspaceId',
-      'template_id': 'manim.elementary_arithmetic_blocks.v1',
-      'language': language,
-      'title': title,
-      'subtitle': isId
-          ? 'Gabungkan dua kelompok benda.'
-          : 'Combine two groups of objects.',
-      'operation_type': 'addition',
-      'operands': [12, 8],
-      'blocks': {'model': 'counters'},
-      'grouping_steps': [
-        {
-          'label': isId ? 'Gabungkan semua blok' : 'Combine all blocks',
-          'value': 20,
-        },
-      ],
-      'result': 20,
-      'steps': [
-        {
-          'title': isId ? 'Ada dua kelompok' : 'Two groups',
-          'body': isId
-              ? 'Kelompok pertama berisi 12, kelompok kedua berisi 8.'
-              : 'The first group has 12, and the second has 8.',
-          'narration': step1,
-        },
-        {
-          'title': isId ? 'Gabungkan' : 'Combine',
-          'body': isId
-              ? 'Setelah digabung, jumlahnya menjadi 20.'
-              : 'After combining, the total becomes 20.',
-          'narration': step2,
-        },
-      ],
-      'summary': summary,
-      'voiceover_script': intro,
-      'intro_narration': intro,
-      'summary_narration': summary,
-      'narration_segments': _segments(
-        intro: intro,
-        step1: step1,
-        step2: step2,
-        summary: summary,
-      ),
-    };
-  }
-
-  List<Map<String, dynamic>> _segments({
-    required String intro,
-    required String step1,
-    required String step2,
-    required String summary,
-  }) {
-    return [
-      {'slot': 'intro', 'text': intro},
-      {'slot': 'step', 'step_index': 1, 'text': step1},
-      {'slot': 'step', 'step_index': 2, 'text': step2},
-      {'slot': 'summary', 'text': summary},
-    ];
   }
 
   WorkspaceMediaArtifact _latestVideoArtifactFromStatus(
@@ -1434,29 +544,7 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     );
   }
 
-  Future<void> _answerQuiz(String answer) async {
-    final material = _workspaceMaterial;
-    final isCorrect = answer == material.workspaceQuizCorrectAnswer;
-    setState(() {
-      _selectedQuizAnswer = answer;
-      _quizState = isCorrect
-          ? _WorkspaceQuizState.correct
-          : _WorkspaceQuizState.review;
-    });
-    await _appendWorkspaceEvent(
-      eventType: 'quiz_answer',
-      textPayload: answer,
-      metadata: {
-        'selected_answer': answer,
-        'correct_answer': material.workspaceQuizCorrectAnswer,
-        'is_correct': isCorrect,
-        'confidence': isCorrect ? 8 : 4,
-      },
-    );
-    _scrollToBottom();
-  }
-
-  Future<void> _advancePhase({bool force = false}) async {
+  Future<void> _advancePhase() async {
     final workspace = _workspace;
     if (workspace == null || _isLoadingWorkspace || _isPhaseSubmitting) {
       return;
@@ -1468,7 +556,6 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     try {
       final updated = await widget.workspaceRepository.advancePhase(
         workspaceId: workspace.id,
-        force: force,
       );
       if (!mounted || _workspace?.id != workspace.id) {
         return;
@@ -1509,18 +596,21 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     if (workspace == null || _isLoadingWorkspace || _isPhaseSubmitting) {
       return;
     }
-    final wasPosttestEligible = workspace.posttestEligible;
+    final trigger = workspace.posttestTrigger;
+    if (trigger?.isReady == true) {
+      _openPosttestFromWorkspace();
+      return;
+    }
+    if (!workspace.posttestEligible) {
+      return;
+    }
     final shouldStart = await showDialog<bool>(
       context: context,
       builder: (context) {
         final material = _workspaceMaterial;
         return AlertDialog(
           title: Text(material.startPosttestButtonLabel),
-          content: Text(
-            wasPosttestEligible
-                ? material.posttestReadyBody
-                : material.posttestWarningBody,
-          ),
+          content: Text(material.posttestReadyBody),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
@@ -1552,10 +642,15 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
         _workspace = updated;
         _isPhaseSubmitting = false;
       });
-      _openPosttestFromWorkspace(
-        moduleCompleted: true,
-        requestedEarlyPosttest: !wasPosttestEligible,
-      );
+      if (updated.posttestTrigger?.isReady == true) {
+        _openPosttestFromWorkspace();
+      } else {
+        setState(() {
+          _workspaceError =
+              updated.posttestTrigger?.error ??
+              _workspaceMaterial.posttestUnavailableMessage;
+        });
+      }
     } on WorkspaceException catch (error) {
       if (!mounted || _workspace?.id != workspace.id) {
         return;
@@ -1567,10 +662,7 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     }
   }
 
-  void _openPosttestFromWorkspace({
-    required bool moduleCompleted,
-    required bool requestedEarlyPosttest,
-  }) {
+  void _openPosttestFromWorkspace() {
     final arguments = widget.routeArguments;
     final workspaceTitle = _workspace?.currentTopic.trim() ?? '';
     Navigator.of(context).pop(
@@ -1580,8 +672,8 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
         moduleTitle: workspaceTitle.isNotEmpty
             ? workspaceTitle
             : _workspaceMaterial.topicTitle,
-        moduleCompleted: moduleCompleted,
-        requestedEarlyPosttest: requestedEarlyPosttest,
+        moduleCompleted: _workspace?.status == 'completed',
+        requestedEarlyPosttest: false,
         workspaceSessionId: _workspace?.id,
       ),
     );
@@ -1648,10 +740,7 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     await _appendWorkspaceEvent(
       eventType: 'text',
       textPayload: message,
-      metadata: const {
-        'triggered_by': 'workspace_start_chat_button',
-        'stage_intent': 'engage',
-      },
+      metadata: const {'triggered_by': 'workspace_start_chat_button'},
     );
     _scrollToBottom();
   }
@@ -1696,15 +785,9 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
       setState(() {
         _workspace = result.workspace;
         _sessionHistory = history;
-        if (result.tutorResponse != null &&
-            result.tutorResponse!.text.trim().isNotEmpty) {
-          _chatEntries.add(
-            _WorkspaceChatEntry.text(
-              text: result.tutorResponse!.text,
-              isUser: false,
-            ),
-          );
-        }
+        _chatEntries
+          ..clear()
+          ..addAll(_entriesFromEvents(result.workspace.events));
         _isAppendingEvent = false;
       });
     } on WorkspaceException catch (error) {
@@ -1796,42 +879,6 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     return workspace.phaseTransitionPending;
   }
 
-  bool _canForceAdvancePhase(WorkspaceSession? workspace) {
-    if (workspace == null) {
-      return false;
-    }
-    if (workspace.currentPhase == 'evaluate') {
-      return false;
-    }
-    return !_isLoadingWorkspace && !_isPhaseSubmitting && !_isAppendingEvent;
-  }
-
-  Future<void> _requestForceAdvancePhase() async {
-    final shouldForce = await showDialog<bool>(
-      context: context,
-      builder: (context) {
-        final material = _workspaceMaterial;
-        return AlertDialog(
-          title: Text(material.forceAdvancePhaseLabel),
-          content: Text(material.forceAdvancePhaseBody),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: Text(material.cancelLabel),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              child: Text(material.forceAdvancePhaseLabel),
-            ),
-          ],
-        );
-      },
-    );
-    if (shouldForce == true) {
-      await _advancePhase(force: true);
-    }
-  }
-
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scrollController.hasClients) return;
@@ -1862,14 +909,10 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     );
     final material = _workspaceMaterial;
     final workspace = _workspace;
-    final showStartPosttestButton = workspace != null;
+    final showStartPosttestButton =
+        workspace?.posttestEligible == true ||
+        workspace?.posttestTrigger?.isReady == true;
     final canAdvancePhase = _canAdvancePhase(workspace);
-    final canForceAdvancePhase = _canForceAdvancePhase(workspace);
-    final showCheckUnderstanding =
-        Local5EOrchestrator.normalizePhase(
-          workspace?.currentPhase ?? 'engage',
-        ) ==
-        'evaluate';
     final workspaceDescription =
         (_workspace?.currentTopicDescription.trim().isNotEmpty ?? false)
         ? _workspace!.currentTopicDescription.trim()
@@ -2076,8 +1119,6 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
                               ),
                               child: _WorkspaceChatPanel(
                                 contentMode: _contentMode,
-                                quizState: _quizState,
-                                selectedQuizAnswer: _selectedQuizAnswer,
                                 chatEntries: _chatEntries,
                                 canvasSnapshots: _canvasSnapshots,
                                 material: material,
@@ -2091,7 +1132,6 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
                                 videoErrorMessage: _videoErrorMessage,
                                 canGenerateVideo:
                                     _canGenerateVideoForCurrentTopic(),
-                                videoTemplateHint: _videoTemplateHintMessage(),
                                 weeklyReport: _reportCardDismissed
                                     ? null
                                     : _weeklyReport,
@@ -2101,12 +1141,10 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
                                 onGenerateVideo: () {
                                   unawaited(_generateVideo());
                                 },
-                                onAnswerQuiz: _answerQuiz,
                                 onStartChat: () {
                                   unawaited(_startLearningChat());
                                 },
                                 onOpenCanvas: _openCanvas,
-                                showCheckUnderstanding: showCheckUnderstanding,
                               ),
                             ),
                           );
@@ -2119,14 +1157,10 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
                       onAdvancePhase: () {
                         unawaited(_advancePhase());
                       },
-                      onForceAdvancePhase: () {
-                        unawaited(_requestForceAdvancePhase());
-                      },
                       onGenerateVideo: () {
                         unawaited(_generateVideo());
                       },
                       canAdvancePhase: canAdvancePhase,
-                      canForceAdvancePhase: canForceAdvancePhase,
                       isPhaseSubmitting: _isPhaseSubmitting,
                       isVideoGenerating: _isVideoGenerating,
                       canGenerateVideo: _canGenerateVideoForCurrentTopic(),
@@ -2259,16 +1293,6 @@ class _LocalizedWorkspaceMaterial {
   const _LocalizedWorkspaceMaterial({
     required this.isIndonesian,
     required this.topicTitle,
-    required this.workspaceIntroLine1,
-    required this.workspaceIntroLine2,
-    required this.workspaceExplanation,
-    required this.workspaceQuizQuestion,
-    required this.workspaceQuizOptions,
-    required this.workspaceQuizCorrectAnswer,
-    required this.workspaceQuizCorrectFeedback,
-    required this.workspaceQuizReviewFeedback,
-    required this.checkUnderstandingTitle,
-    required this.materialRecapLabel,
     required this.startChatTitle,
     required this.startChatBody,
     required this.startChatButtonLabel,
@@ -2278,16 +1302,6 @@ class _LocalizedWorkspaceMaterial {
 
   final bool isIndonesian;
   final String topicTitle;
-  final String workspaceIntroLine1;
-  final String workspaceIntroLine2;
-  final String workspaceExplanation;
-  final String workspaceQuizQuestion;
-  final List<String> workspaceQuizOptions;
-  final String workspaceQuizCorrectAnswer;
-  final String workspaceQuizCorrectFeedback;
-  final String workspaceQuizReviewFeedback;
-  final String checkUnderstandingTitle;
-  final String materialRecapLabel;
   final String startChatTitle;
   final String startChatBody;
   final String startChatButtonLabel;
@@ -2302,11 +1316,6 @@ class _LocalizedWorkspaceMaterial {
       isIndonesian ? 'Lanjut fase' : 'Advance phase';
   String get advancingPhaseLabel =>
       isIndonesian ? 'Memindahkan fase...' : 'Advancing phase...';
-  String get forceAdvancePhaseLabel =>
-      isIndonesian ? 'Lanjut paksa' : 'Force advance';
-  String get forceAdvancePhaseBody => isIndonesian
-      ? 'Gunakan hanya jika tutor belum menandai siap. Backend tetap memvalidasi minimum turn pada fase ini.'
-      : 'Use this only if tutor has not marked the phase ready yet. Backend still validates minimum turns for this phase.';
   String get phaseTransitionHint => isIndonesian
       ? "Tekan 'Lanjut fase' kalau sudah paham."
       : "Tap 'Advance phase' when you are ready.";
@@ -2327,15 +1336,11 @@ class _LocalizedWorkspaceMaterial {
       ? 'Mulai posttest sekarang? Ini akan menutup modul workspace dan menyiapkan sesi posttest.'
       : 'Start posttest now? This will complete the workspace module and prepare the posttest session.';
   String get cancelLabel => isIndonesian ? 'Batal' : 'Cancel';
-  String get posttestWarningTitle =>
-      isIndonesian ? 'Workspace belum selesai' : 'Workspace not finished yet';
-  String get posttestWarningBody => isIndonesian
-      ? 'Kamu belum menyelesaikan modul workspace ini. Mulai posttest sekarang dapat melewati bukti latihan untuk konsep ini.'
-      : 'You have not finished this workspace module. Starting the posttest now may skip practice evidence for this concept.';
-  String get keepLearningLabel =>
-      isIndonesian ? 'Lanjut belajar' : 'Keep learning';
   String get startPosttestDialogLabel =>
       isIndonesian ? 'Mulai posttest' : 'Start posttest';
+  String get posttestUnavailableMessage => isIndonesian
+      ? 'Posttest belum siap. Lanjutkan sesuai arahan tutor.'
+      : 'The posttest is not ready yet. Continue with the tutor guidance.';
   String get workspaceNotReadyMessage =>
       isIndonesian ? 'Workspace belum siap.' : 'Workspace is not ready yet.';
   String get openTrackModuleMessage => isIndonesian
@@ -2451,124 +1456,40 @@ class _LocalizedWorkspaceMaterial {
       ? 'Sinkronisasi workspace gagal: $message'
       : 'Workspace sync failed: $message';
 
-  factory _LocalizedWorkspaceMaterial.fromAssessmentPack(
-    HardcodedAssessmentPack pack, {
-    required String languageCode,
-  }) {
+  factory _LocalizedWorkspaceMaterial.forLanguage(String languageCode) {
     if (languageCode == 'id') {
-      return _LocalizedWorkspaceMaterial(
+      return const _LocalizedWorkspaceMaterial(
         isIndonesian: true,
-        topicTitle: pack.topicTitle,
-        workspaceIntroLine1: pack.workspaceIntroLine1,
-        workspaceIntroLine2: pack.workspaceIntroLine2,
-        workspaceExplanation: pack.workspaceExplanation,
-        workspaceQuizQuestion: pack.workspaceQuizQuestion,
-        workspaceQuizOptions: pack.workspaceQuizOptions,
-        workspaceQuizCorrectAnswer: pack.workspaceQuizCorrectAnswer,
-        workspaceQuizCorrectFeedback: pack.workspaceQuizCorrectFeedback,
-        workspaceQuizReviewFeedback: pack.workspaceQuizReviewFeedback,
-        checkUnderstandingTitle: 'Cek pemahaman',
-        materialRecapLabel: 'Ringkasan materi',
-        startChatTitle: 'Mulai chat 5E',
+        topicTitle: 'Topik pembelajaran',
+        startChatTitle: 'Mulai sesi belajar',
         startChatBody:
-            'Mulai dari pertanyaan pembuka tutor. Ini menjalankan tahap Engage dan membuat bukti workspace pertama.',
+            'Tutor akan memandu dari diagnosis dan fase belajar yang tersimpan di backend.',
         startChatButtonLabel: 'Mulai chat belajar',
         loadingDescription:
-            'Hubungkan modul ini ke bukti workspace backend sebelum chat, sketsa, atau menjawab.',
+            'Menghubungkan modul dengan konteks belajar dari backend.',
         syncedDescription:
-            'Pesan, snapshot kanvas, dan jawaban kuis disinkronkan sebagai bukti workspace.',
-      );
-    }
-
-    if (pack.id == 'multiplication') {
-      return const _LocalizedWorkspaceMaterial(
-        isIndonesian: false,
-        topicTitle: 'Multiplication',
-        workspaceIntroLine1:
-            "Let's start the multiplication workspace with a short 5E chat.",
-        workspaceIntroLine2:
-            'We will focus on multiplication as equal-size groups, then do a quick check before the posttest.',
-        workspaceExplanation:
-            'Multiplication is a fast way to add equal-size groups. For example, 4 x 3 means there are 4 groups, and each group has 3 objects. So 4 x 3 is the same as 3 + 3 + 3 + 3, which equals 12.',
-        workspaceQuizQuestion:
-            'If there are 4 groups and each group has 3 objects, how many objects are there in total?',
-        workspaceQuizOptions: ['7', '12', '16'],
-        workspaceQuizCorrectAnswer: '12',
-        workspaceQuizCorrectFeedback:
-            'Correct. 4 groups of 3 means 3 + 3 + 3 + 3 = 12.',
-        workspaceQuizReviewFeedback: 'Almost. Count 3 four times.',
-        checkUnderstandingTitle: 'Check understanding',
-        materialRecapLabel: 'Material recap',
-        startChatTitle: 'Start the 5E chat',
-        startChatBody:
-            'Begin with the tutor opening question. This starts the Engage step and creates the first workspace evidence.',
-        startChatButtonLabel: 'Start learning chat',
-        loadingDescription:
-            'Connect this module to backend workspace evidence before chatting, sketching, or answering.',
-        syncedDescription:
-            'Your messages, canvas snapshots, and quiz answers are synced to backend workspace evidence.',
+            'Percakapan, kanvas, media, dan status fase disinkronkan dengan backend.',
       );
     }
 
     return const _LocalizedWorkspaceMaterial(
       isIndonesian: false,
-      topicTitle: 'Algebra',
-      workspaceIntroLine1:
-          "Let's start the algebra workspace with a short 5E chat.",
-      workspaceIntroLine2:
-          'We will focus on algebra and Al-Khwarizmi-style reasoning, so the concept makes sense instead of being memorized.',
-      workspaceExplanation:
-          'Al-Khwarizmi showed algebra as a way to rearrange quadratic forms into complete squares. From that idea, we can see why quadratic equations can be solved step by step, instead of only memorizing a formula.',
-      workspaceQuizQuestion:
-          'If (x + 3)(x + 4) = 0, which values of x satisfy the equation?',
-      workspaceQuizOptions: [
-        'x = -3 or x = -4',
-        'x = 3 or x = 4',
-        'x = -7 or x = 12',
-      ],
-      workspaceQuizCorrectAnswer: 'x = -3 or x = -4',
-      workspaceQuizCorrectFeedback:
-          'Correct. Set each factor equal to zero: x + 3 = 0 or x + 4 = 0.',
-      workspaceQuizReviewFeedback:
-          'Almost. Remember, if x + 3 = 0, then x = -3.',
-      checkUnderstandingTitle: 'Check understanding',
-      materialRecapLabel: 'Material recap',
-      startChatTitle: 'Start the 5E chat',
+      topicTitle: 'Learning topic',
+      startChatTitle: 'Start learning',
       startChatBody:
-          'Begin with the tutor opening question. This starts the Engage step and creates the first workspace evidence.',
+          'The tutor will guide you from the diagnosis and learning phase stored by the backend.',
       startChatButtonLabel: 'Start learning chat',
       loadingDescription:
-          'Connect this module to backend workspace evidence before chatting, sketching, or answering.',
+          'Connecting this module to the backend learning context.',
       syncedDescription:
-          'Your messages, canvas snapshots, and quiz answers are synced to backend workspace evidence.',
+          'Conversation, canvas, media, and phase state are synced with the backend.',
     );
   }
-}
-
-class _VideoGenerationPayload {
-  const _VideoGenerationPayload({
-    required this.templateId,
-    required this.specJson,
-    required this.language,
-  });
-
-  final String templateId;
-  final Map<String, dynamic> specJson;
-  final String language;
-}
-
-class _VideoTemplateMatch {
-  const _VideoTemplateMatch({required this.templateId, required this.keywords});
-
-  final String templateId;
-  final List<String> keywords;
 }
 
 class _WorkspaceChatPanel extends StatelessWidget {
   const _WorkspaceChatPanel({
     required this.contentMode,
-    required this.quizState,
-    required this.selectedQuizAnswer,
     required this.chatEntries,
     required this.canvasSnapshots,
     required this.material,
@@ -2581,19 +1502,14 @@ class _WorkspaceChatPanel extends StatelessWidget {
     required this.videoStatusMessage,
     required this.videoErrorMessage,
     required this.canGenerateVideo,
-    required this.videoTemplateHint,
     required this.onGenerateVideo,
-    required this.onAnswerQuiz,
     required this.onStartChat,
     required this.onOpenCanvas,
-    required this.showCheckUnderstanding,
     this.weeklyReport,
     this.onDismissReport,
   });
 
   final _WorkspaceContentMode contentMode;
-  final _WorkspaceQuizState quizState;
-  final String? selectedQuizAnswer;
   final List<_WorkspaceChatEntry> chatEntries;
   final List<CanvasWorkSnapshot> canvasSnapshots;
   final _LocalizedWorkspaceMaterial material;
@@ -2606,12 +1522,9 @@ class _WorkspaceChatPanel extends StatelessWidget {
   final String? videoStatusMessage;
   final String? videoErrorMessage;
   final bool canGenerateVideo;
-  final String? videoTemplateHint;
   final VoidCallback onGenerateVideo;
-  final ValueChanged<String> onAnswerQuiz;
   final VoidCallback onStartChat;
   final VoidCallback onOpenCanvas;
-  final bool showCheckUnderstanding;
   final WeeklyLearningReport? weeklyReport;
   final VoidCallback? onDismissReport;
 
@@ -2622,9 +1535,7 @@ class _WorkspaceChatPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          SpeechStatusBanner(
-            locale: material.isIndonesian ? 'id-ID' : 'en-US',
-          ),
+          SpeechStatusBanner(locale: material.isIndonesian ? 'id-ID' : 'en-US'),
           // ── Weekly report card (dismissible, shown at top of chat) ────────
           if (weeklyReport != null) ...[
             _WeeklyReportChatCard(
@@ -2633,26 +1544,7 @@ class _WorkspaceChatPanel extends StatelessWidget {
             ),
             const SizedBox(height: 14),
           ],
-          _AssistantMessageFrame(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                _WorkspaceBubble(
-                  text: material.workspaceIntroLine1,
-                  isUser: false,
-                  locale: material.isIndonesian ? 'id-ID' : 'en-US',
-                ),
-                const SizedBox(height: 9),
-                _WorkspaceBubble(
-                  text: material.workspaceIntroLine2,
-                  isUser: false,
-                  locale: material.isIndonesian ? 'id-ID' : 'en-US',
-                ),
-              ],
-            ),
-          ),
           if (isLoadingWorkspace) ...[
-            const SizedBox(height: 10),
             _WorkspaceSyncNotice(
               icon: Icons.cloud_sync_outlined,
               text: material.connectingWorkspaceMessage,
@@ -2671,14 +1563,6 @@ class _WorkspaceChatPanel extends StatelessWidget {
               text: material.savingEvidenceMessage,
             ),
           ],
-          if (videoTemplateHint != null) ...[
-            const SizedBox(height: 10),
-            _WorkspaceSyncNotice(
-              icon: Icons.info_outline_rounded,
-              text: videoTemplateHint!,
-              isError: true,
-            ),
-          ],
           if (!isLoadingWorkspace &&
               workspaceError == null &&
               chatEntries.isEmpty) ...[
@@ -2686,18 +1570,6 @@ class _WorkspaceChatPanel extends StatelessWidget {
             _WorkspaceStartChatCard(
               material: material,
               onStartChat: onStartChat,
-            ),
-          ],
-          if (!isLoadingWorkspace &&
-              workspaceError == null &&
-              chatEntries.isNotEmpty &&
-              showCheckUnderstanding) ...[
-            const SizedBox(height: 14),
-            _WorkspaceQuizCard(
-              quizState: quizState,
-              selectedAnswer: selectedQuizAnswer,
-              onAnswer: onAnswerQuiz,
-              material: material,
             ),
           ],
           const SizedBox(height: 14),
@@ -3926,88 +2798,6 @@ class _GeneratedVideoChip extends StatelessWidget {
   }
 }
 
-class _WorkspaceQuizCard extends StatelessWidget {
-  const _WorkspaceQuizCard({
-    required this.quizState,
-    required this.selectedAnswer,
-    required this.onAnswer,
-    required this.material,
-  });
-
-  final _WorkspaceQuizState quizState;
-  final String? selectedAnswer;
-  final ValueChanged<String> onAnswer;
-  final _LocalizedWorkspaceMaterial material;
-
-  @override
-  Widget build(BuildContext context) {
-    final locale = material.isIndonesian ? 'id-ID' : 'en-US';
-    final quizSpeech = <String>[
-      material.workspaceExplanation,
-      material.workspaceQuizQuestion,
-      ...material.workspaceQuizOptions,
-    ].join('. ');
-    return _WorkspaceRichBubble(
-      icon: Icons.quiz_outlined,
-      title: material.checkUnderstandingTitle,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          _WorkspaceMaterialRecap(
-            title: material.materialRecapLabel,
-            explanationText: material.workspaceExplanation,
-            locale: locale,
-          ),
-          const SizedBox(height: 8),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: ReadAloudButton(
-              textToRead: quizSpeech,
-              locale: locale,
-            ),
-          ),
-          const SizedBox(height: 12),
-          Text(
-            material.workspaceQuizQuestion,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: WicaraColors.text,
-              fontWeight: FontWeight.w700,
-              height: 1.35,
-            ),
-          ),
-          const SizedBox(height: 12),
-          for (final answer in material.workspaceQuizOptions)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: _WorkspaceQuizOption(
-                label: answer,
-                isSelected: selectedAnswer == answer,
-                isCorrect: answer == material.workspaceQuizCorrectAnswer,
-                hasAnswered: quizState != _WorkspaceQuizState.unanswered,
-                onPressed: () => onAnswer(answer),
-              ),
-            ),
-          if (quizState != _WorkspaceQuizState.unanswered) ...[
-            const SizedBox(height: 3),
-            Text(
-              quizState == _WorkspaceQuizState.correct
-                  ? material.workspaceQuizCorrectFeedback
-                  : material.workspaceQuizReviewFeedback,
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: quizState == _WorkspaceQuizState.correct
-                    ? WicaraColors.accentMint
-                    : WicaraColors.accentCoral,
-                fontWeight: FontWeight.w700,
-                height: 1.3,
-              ),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
 class _WorkspaceStartChatCard extends StatelessWidget {
   const _WorkspaceStartChatCard({
     required this.material,
@@ -4040,124 +2830,6 @@ class _WorkspaceStartChatCard extends StatelessWidget {
             label: Text(material.startChatButtonLabel),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _WorkspaceMaterialRecap extends StatelessWidget {
-  const _WorkspaceMaterialRecap({
-    required this.title,
-    required this.explanationText,
-    required this.locale,
-  });
-
-  final String title;
-  final String explanationText;
-  final String locale;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: WicaraColors.speechBlue,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: WicaraColors.primaryLight),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            title,
-            style: Theme.of(context).textTheme.labelMedium?.copyWith(
-              color: WicaraColors.primaryDeep,
-              fontWeight: FontWeight.w800,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            explanationText,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: WicaraColors.text,
-              fontWeight: FontWeight.w600,
-              height: 1.38,
-            ),
-          ),
-          const SizedBox(height: 8),
-          ReadAloudButton(textToRead: explanationText, locale: locale),
-        ],
-      ),
-    );
-  }
-}
-
-class _WorkspaceQuizOption extends StatelessWidget {
-  const _WorkspaceQuizOption({
-    required this.label,
-    required this.isSelected,
-    required this.isCorrect,
-    required this.hasAnswered,
-    required this.onPressed,
-  });
-
-  final String label;
-  final bool isSelected;
-  final bool isCorrect;
-  final bool hasAnswered;
-  final VoidCallback onPressed;
-
-  Color get _borderColor {
-    if (!hasAnswered || !isSelected) return WicaraColors.line;
-    return isCorrect ? WicaraColors.accentMint : WicaraColors.accentCoral;
-  }
-
-  Color get _background {
-    if (!hasAnswered || !isSelected) return Colors.white;
-    return isCorrect
-        ? WicaraColors.speechGreen
-        : WicaraColors.glowPeach.withValues(alpha: 0.62);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: _background,
-      borderRadius: BorderRadius.circular(11),
-      child: InkWell(
-        onTap: onPressed,
-        borderRadius: BorderRadius.circular(11),
-        child: Container(
-          height: 42,
-          padding: const EdgeInsets.symmetric(horizontal: 12),
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(11),
-            border: Border.all(color: _borderColor, width: 1.2),
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: Text(
-                  label,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: WicaraColors.ink,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-              if (hasAnswered && isSelected)
-                Icon(
-                  isCorrect
-                      ? Icons.check_circle_rounded
-                      : Icons.refresh_rounded,
-                  color: isCorrect
-                      ? WicaraColors.accentMint
-                      : WicaraColors.accentCoral,
-                  size: 19,
-                ),
-            ],
-          ),
-        ),
       ),
     );
   }
@@ -4352,7 +3024,11 @@ class _WorkspaceCompactHeaderStatus extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final currentPhase = Local5EOrchestrator.normalizePhase(phase);
+    const phases = {'engage', 'explore', 'explain', 'elaborate', 'evaluate'};
+    final normalizedPhase = phase.trim().toLowerCase();
+    final currentPhase = phases.contains(normalizedPhase)
+        ? normalizedPhase
+        : 'engage';
     final chipColor = phaseTransitionPending
         ? WicaraColors.secondarySoft
         : WicaraColors.fieldFill;
@@ -4413,10 +3089,8 @@ class _WorkspaceFooter extends StatelessWidget {
     required this.controller,
     required this.onSend,
     required this.onAdvancePhase,
-    required this.onForceAdvancePhase,
     required this.onGenerateVideo,
     required this.canAdvancePhase,
-    required this.canForceAdvancePhase,
     required this.isPhaseSubmitting,
     required this.isVideoGenerating,
     required this.canGenerateVideo,
@@ -4427,10 +3101,8 @@ class _WorkspaceFooter extends StatelessWidget {
   final TextEditingController controller;
   final VoidCallback onSend;
   final VoidCallback onAdvancePhase;
-  final VoidCallback onForceAdvancePhase;
   final VoidCallback onGenerateVideo;
   final bool canAdvancePhase;
-  final bool canForceAdvancePhase;
   final bool isPhaseSubmitting;
   final bool isVideoGenerating;
   final bool canGenerateVideo;
@@ -4504,29 +3176,6 @@ class _WorkspaceFooter extends StatelessWidget {
                     ),
                   ),
                 ),
-                if (canForceAdvancePhase) ...[
-                  const SizedBox(width: 8),
-                  PopupMenuButton<String>(
-                    tooltip: material.forceAdvancePhaseLabel,
-                    onSelected: (value) {
-                      if (value == 'force') {
-                        onForceAdvancePhase();
-                      }
-                    },
-                    itemBuilder: (context) {
-                      return [
-                        PopupMenuItem<String>(
-                          value: 'force',
-                          child: Text(material.forceAdvancePhaseLabel),
-                        ),
-                      ];
-                    },
-                    child: const Padding(
-                      padding: EdgeInsets.all(8),
-                      child: Icon(Icons.more_vert_rounded),
-                    ),
-                  ),
-                ],
               ],
             ),
             const SizedBox(height: 8),
