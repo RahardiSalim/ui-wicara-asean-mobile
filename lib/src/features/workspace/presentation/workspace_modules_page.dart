@@ -821,6 +821,9 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
           return _WorkspaceChatEntry.text(
             text: event.textPayload,
             isUser: event.isLearner,
+            nextActions: event.tutorNextActions,
+            evidenceRequest: event.tutorEvidenceRequest,
+            explanationCard: event.tutorExplanationCard,
           );
         })
         .whereType<_WorkspaceChatEntry>()
@@ -1179,16 +1182,33 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
 }
 
 class _WorkspaceChatEntry {
-  const _WorkspaceChatEntry.text({required this.text, required this.isUser})
-    : snapshot = null;
+  const _WorkspaceChatEntry.text({
+    required this.text,
+    required this.isUser,
+    this.nextActions = const [],
+    this.evidenceRequest,
+    this.explanationCard,
+  }) : snapshot = null;
 
-  const _WorkspaceChatEntry.canvas(this.snapshot) : text = null, isUser = true;
+  const _WorkspaceChatEntry.canvas(this.snapshot)
+    : text = null,
+      isUser = true,
+      nextActions = const [],
+      evidenceRequest = null,
+      explanationCard = null;
 
   final String? text;
   final bool isUser;
   final CanvasWorkSnapshot? snapshot;
+  final List<String> nextActions;
+  final Map<String, dynamic>? evidenceRequest;
+  final Map<String, dynamic>? explanationCard;
 
   bool get isCanvas => snapshot != null;
+  bool get hasStructuredTutorData =>
+      nextActions.isNotEmpty ||
+      (evidenceRequest?.isNotEmpty ?? false) ||
+      (explanationCard?.isNotEmpty ?? false);
 }
 
 class _WorkspaceHistorySheet extends StatelessWidget {
@@ -1418,6 +1438,12 @@ class _LocalizedWorkspaceMaterial {
   String get useCanvasLabel => isIndonesian ? 'Pakai kanvas' : 'Use canvas';
   String get canvasSentLabel =>
       isIndonesian ? 'Kanvas terkirim' : 'Canvas sent';
+  String get explanationCardLabel =>
+      isIndonesian ? 'Kartu penjelasan' : 'Explanation card';
+  String get evidenceRequestLabel =>
+      isIndonesian ? 'Bukti yang diminta' : 'Evidence requested';
+  String get nextActionsLabel =>
+      isIndonesian ? 'Aksi berikutnya' : 'Next actions';
   String canvasSnapshotSentLabel(Object? count) {
     final suffix = count == null
         ? ''
@@ -1599,10 +1625,24 @@ class _WorkspaceChatPanel extends StatelessWidget {
               )
             else
               _AssistantMessageFrame(
-                child: _WorkspaceBubble(
-                  text: entry.text!,
-                  isUser: false,
-                  locale: material.isIndonesian ? 'id-ID' : 'en-US',
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _WorkspaceBubble(
+                      text: entry.text!,
+                      isUser: false,
+                      locale: material.isIndonesian ? 'id-ID' : 'en-US',
+                    ),
+                    if (entry.hasStructuredTutorData) ...[
+                      const SizedBox(height: 8),
+                      _StructuredTutorData(
+                        explanationCard: entry.explanationCard,
+                        evidenceRequest: entry.evidenceRequest,
+                        nextActions: entry.nextActions,
+                        material: material,
+                      ),
+                    ],
+                  ],
                 ),
               ),
           ],

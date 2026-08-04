@@ -142,16 +142,12 @@ class ApiWorkspaceRepository implements WorkspaceRepository {
   }
 
   @override
-  Future<WorkspaceSession> advancePhase({
-    required String workspaceId,
-    bool force = false,
-  }) async {
+  Future<WorkspaceSession> advancePhase({required String workspaceId}) async {
     final token = _requireToken();
     try {
       final json = await _apiClient.postJson(
         '/api/v1/workspaces/$workspaceId/advance-phase',
         headers: {'Authorization': 'Bearer $token'},
-        queryParameters: {'force': force.toString()},
       );
       return workspaceFromJson(json);
     } on ApiClientException catch (error) {

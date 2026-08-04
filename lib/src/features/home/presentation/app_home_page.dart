@@ -123,6 +123,7 @@ class _AppHomePageState extends State<AppHomePage> {
   int _posttestIndex = 0;
   final Map<int, String> _dailyEvaluationAnswers = {};
   final Map<int, String> _posttestAnswers = {};
+  final Map<int, int> _posttestConfidences = {};
   String? _dailyEvaluationSessionId;
   DailyEvaluationSession? _dailyEvaluationSession;
   DailyEvaluationResult? _dailyEvaluationResult;
@@ -133,6 +134,7 @@ class _AppHomePageState extends State<AppHomePage> {
   bool _isLoadingPosttest = false;
   bool _isSubmittingPosttest = false;
   String? _posttestError;
+  String? _lastPosttestWorkspaceSessionId;
   String _lastPosttestTrackId = '';
   String _lastPosttestModuleId = '';
   String? _selectedGoalSubject;
@@ -697,6 +699,7 @@ class _AppHomePageState extends State<AppHomePage> {
     if (!mounted) return;
     _retryHomeSnapshot();
     if (result is WorkspaceCompletionResult) {
+      _lastPosttestWorkspaceSessionId = result.workspaceSessionId;
       _lastPosttestTrackId = result.trackId;
       _lastPosttestModuleId = result.moduleId;
       _openPosttest(
@@ -723,6 +726,7 @@ class _AppHomePageState extends State<AppHomePage> {
       _showKnowledgeMap = false;
       _posttestIndex = 0;
       _posttestAnswers.clear();
+      _posttestConfidences.clear();
       _posttestResult = null;
       _posttestSessionId = null;
       _posttestSessionData = null;
@@ -772,6 +776,10 @@ class _AppHomePageState extends State<AppHomePage> {
     setState(() => _posttestAnswers[_posttestIndex] = optionId);
   }
 
+  void _selectPosttestConfidence(int confidence) {
+    setState(() => _posttestConfidences[_posttestIndex] = confidence);
+  }
+
   Future<void> _nextPosttestQuestion() async {
     final sessionId = _posttestSessionId;
     if (sessionId == null || sessionId.isEmpty) {
@@ -779,7 +787,11 @@ class _AppHomePageState extends State<AppHomePage> {
     }
     final questions = _backendPosttestQuestions;
     final optionId = _posttestAnswers[_posttestIndex];
-    if (optionId == null || optionId.isEmpty || _isSubmittingPosttest) {
+    final confidence = _posttestConfidences[_posttestIndex];
+    if (optionId == null ||
+        optionId.isEmpty ||
+        confidence == null ||
+        _isSubmittingPosttest) {
       return;
     }
     setState(() => _isSubmittingPosttest = true);
@@ -788,7 +800,7 @@ class _AppHomePageState extends State<AppHomePage> {
         sessionId: sessionId,
         questionId: questions[_posttestIndex].id,
         optionId: optionId,
-        confidence: 6,
+        confidence: confidence,
       );
       if (!mounted) {
         return;
@@ -996,7 +1008,11 @@ class _AppHomePageState extends State<AppHomePage> {
                   : 'Backend returned no posttest questions.'),
           actionLabel: copy.isIndonesian ? 'Coba lagi' : 'Try again',
           onAction: () {
-            _openPosttest();
+            _openPosttest(
+              workspaceSessionId: _lastPosttestWorkspaceSessionId,
+              trackId: _lastPosttestTrackId,
+              moduleId: _lastPosttestModuleId,
+            );
           },
         );
       }
@@ -1009,8 +1025,10 @@ class _AppHomePageState extends State<AppHomePage> {
         questionIndex: _posttestIndex,
         totalQuestions: _backendPosttestQuestions.length,
         selectedOptionId: _posttestAnswers[_posttestIndex],
+        selectedConfidence: _posttestConfidences[_posttestIndex],
         onBack: _previousPosttestQuestion,
         onSelected: _selectPosttestAnswer,
+        onConfidenceChanged: _selectPosttestConfidence,
         isSubmitting: _isSubmittingPosttest,
         sectionLabel: session.title,
         subtitle: copy.isIndonesian
@@ -3317,6 +3335,8 @@ class _DailyEvaluationQuestionPage extends StatelessWidget {
     this.finishLabel,
     this.showContextPanels = true,
     this.showLanguageChip = true,
+    this.selectedConfidence,
+    this.onConfidenceChanged,
   });
 
   final BoxConstraints constraints;
@@ -3326,8 +3346,10 @@ class _DailyEvaluationQuestionPage extends StatelessWidget {
   final int questionIndex;
   final int totalQuestions;
   final String? selectedOptionId;
+  final int? selectedConfidence;
   final VoidCallback onBack;
   final ValueChanged<String> onSelected;
+  final ValueChanged<int>? onConfidenceChanged;
   final bool isSubmitting;
   final VoidCallback onSubmit;
   final String? sectionLabel;
@@ -3471,12 +3493,24 @@ class _DailyEvaluationQuestionPage extends StatelessWidget {
                     if (index < question.options.length - 1)
                       const SizedBox(height: 10),
                   ],
+                  if (onConfidenceChanged != null) ...[
+                    const SizedBox(height: 22),
+                    _PosttestConfidenceSelector(
+                      selectedValue: selectedConfidence,
+                      onSelected: onConfidenceChanged!,
+                    ),
+                  ],
                   const SizedBox(height: 22),
                   GradientButton(
                     label: isLastQuestion
                         ? resolvedFinishLabel
                         : resolvedNextLabel,
-                    onPressed: selectedOptionId == null ? null : onSubmit,
+                    onPressed:
+                        selectedOptionId == null ||
+                            (onConfidenceChanged != null &&
+                                selectedConfidence == null)
+                        ? null
+                        : onSubmit,
                     isLoading: isSubmitting,
                   ),
                 ],
@@ -3488,6 +3522,75 @@ class _DailyEvaluationQuestionPage extends StatelessWidget {
             ],
           ],
         ),
+      ),
+    );
+  }
+}
+
+class _PosttestConfidenceSelector extends StatelessWidget {
+  const _PosttestConfidenceSelector({
+    required this.selectedValue,
+    required this.onSelected,
+  });
+
+  final int? selectedValue;
+  final ValueChanged<int> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final copy = _HomeCopyScope.of(context);
+    return Semantics(
+      container: true,
+      label: copy.isIndonesian
+          ? 'Tingkat keyakinan jawaban'
+          : 'Answer confidence level',
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            copy.isIndonesian
+                ? 'Seberapa yakin dengan jawabanmu?'
+                : 'How confident are you in your answer?',
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+              color: WicaraColors.ink,
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            copy.isIndonesian
+                ? 'Pilih 0 (tidak yakin) sampai 10 (sangat yakin).'
+                : 'Choose 0 (not confident) to 10 (very confident).',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: WicaraColors.muted,
+              height: 1.3,
+            ),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (var value = 0; value <= 10; value++)
+                ChoiceChip(
+                  key: ValueKey('posttest-confidence-$value'),
+                  label: Text('$value'),
+                  selected: selectedValue == value,
+                  onSelected: (_) => onSelected(value),
+                  selectedColor: WicaraColors.speechBlue,
+                  side: BorderSide(
+                    color: selectedValue == value
+                        ? WicaraColors.secondary
+                        : WicaraColors.line,
+                  ),
+                  labelStyle: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: WicaraColors.ink,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+            ],
+          ),
+        ],
       ),
     );
   }

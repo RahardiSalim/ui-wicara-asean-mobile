@@ -1172,10 +1172,7 @@ class _FakeWorkspaceRepository implements WorkspaceRepository {
   }) async {}
 
   @override
-  Future<WorkspaceSession> advancePhase({
-    required String workspaceId,
-    bool force = false,
-  }) async {
+  Future<WorkspaceSession> advancePhase({required String workspaceId}) async {
     return const WorkspaceSession(
       id: 'workspace-perkalian',
       trackId: 'track-perkalian',

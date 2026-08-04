@@ -112,6 +112,21 @@ void main() {
       expect(requestBody, isNot(contains('spec_json')));
     },
   );
+
+  test('advance phase sends no obsolete force query parameter', () async {
+    late Uri requestedUri;
+    final repository = await _repository(
+      MockClient((request) async {
+        requestedUri = request.url;
+        return _jsonResponse(_workspaceJson());
+      }),
+    );
+
+    await repository.advancePhase(workspaceId: 'workspace-1');
+
+    expect(requestedUri.path, '/api/v1/workspaces/workspace-1/advance-phase');
+    expect(requestedUri.queryParameters, isEmpty);
+  });
 }
 
 Future<ApiWorkspaceRepository> _repository(MockClient httpClient) async {

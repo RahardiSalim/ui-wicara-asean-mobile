@@ -173,6 +173,28 @@ class WorkspaceEvent {
   final Map<String, dynamic> metadata;
 
   bool get isLearner => actorType == 'learner';
+
+  List<String> get tutorNextActions {
+    final value = metadata['next_actions'];
+    if (value is! List) {
+      return const [];
+    }
+    return value.whereType<String>().toList(growable: false);
+  }
+
+  Map<String, dynamic>? get tutorEvidenceRequest =>
+      _structuredTutorMetadata('evidence_request');
+
+  Map<String, dynamic>? get tutorExplanationCard =>
+      _structuredTutorMetadata('explanation_card');
+
+  Map<String, dynamic>? _structuredTutorMetadata(String key) {
+    final value = metadata[key];
+    if (value is! Map) {
+      return null;
+    }
+    return value.map((field, data) => MapEntry(field.toString(), data));
+  }
 }
 
 class WorkspaceTutorResponse {
