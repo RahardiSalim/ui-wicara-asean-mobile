@@ -1824,6 +1824,198 @@ class _WorkspaceBubble extends StatelessWidget {
   }
 }
 
+class _StructuredTutorData extends StatelessWidget {
+  const _StructuredTutorData({
+    required this.explanationCard,
+    required this.evidenceRequest,
+    required this.nextActions,
+    required this.material,
+  });
+
+  final Map<String, dynamic>? explanationCard;
+  final Map<String, dynamic>? evidenceRequest;
+  final List<String> nextActions;
+  final _LocalizedWorkspaceMaterial material;
+
+  @override
+  Widget build(BuildContext context) {
+    final hasExplanationCard = explanationCard?.isNotEmpty ?? false;
+    final hasEvidenceRequest = evidenceRequest?.isNotEmpty ?? false;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (hasExplanationCard)
+          _StructuredTutorCard(
+            icon: Icons.menu_book_outlined,
+            title: material.explanationCardLabel,
+            data: explanationCard!,
+            color: WicaraColors.primary,
+          ),
+        if (hasExplanationCard && hasEvidenceRequest) const SizedBox(height: 8),
+        if (hasEvidenceRequest)
+          _StructuredTutorCard(
+            icon: Icons.fact_check_outlined,
+            title: material.evidenceRequestLabel,
+            data: evidenceRequest!,
+            color: WicaraColors.secondary,
+          ),
+        if ((hasExplanationCard || hasEvidenceRequest) &&
+            nextActions.isNotEmpty)
+          const SizedBox(height: 8),
+        if (nextActions.isNotEmpty)
+          _TutorNextActions(actions: nextActions, material: material),
+      ],
+    );
+  }
+}
+
+class _StructuredTutorCard extends StatelessWidget {
+  const _StructuredTutorCard({
+    required this.icon,
+    required this.title,
+    required this.data,
+    required this.color,
+  });
+
+  final IconData icon;
+  final String title;
+  final Map<String, dynamic> data;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: color.withValues(alpha: 0.22)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 11, 12, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(icon, size: 17, color: color),
+                const SizedBox(width: 7),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      color: WicaraColors.ink,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 9),
+            _StructuredTutorValue(value: data),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StructuredTutorValue extends StatelessWidget {
+  const _StructuredTutorValue({required this.value});
+
+  final Object? value;
+
+  @override
+  Widget build(BuildContext context) {
+    final currentValue = value;
+    if (currentValue is Map) {
+      final entries = currentValue.entries.toList(growable: false);
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (var index = 0; index < entries.length; index++) ...[
+            Text(
+              entries[index].key.toString(),
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: WicaraColors.muted,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 3),
+            _StructuredTutorValue(value: entries[index].value),
+            if (index != entries.length - 1) const SizedBox(height: 8),
+          ],
+        ],
+      );
+    }
+    if (currentValue is List) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          for (final item in currentValue)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 3),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text('• '),
+                  Expanded(child: _StructuredTutorValue(value: item)),
+                ],
+              ),
+            ),
+        ],
+      );
+    }
+    return RichMathText(
+      currentValue?.toString() ?? 'null',
+      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+        color: WicaraColors.text,
+        fontWeight: FontWeight.w600,
+        height: 1.35,
+      ),
+    );
+  }
+}
+
+class _TutorNextActions extends StatelessWidget {
+  const _TutorNextActions({required this.actions, required this.material});
+
+  final List<String> actions;
+  final _LocalizedWorkspaceMaterial material;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          material.nextActionsLabel,
+          style: Theme.of(context).textTheme.labelMedium?.copyWith(
+            color: WicaraColors.secondaryDeep,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            for (final action in actions)
+              Chip(
+                avatar: const Icon(Icons.arrow_forward_rounded, size: 15),
+                label: Text(action),
+                backgroundColor: WicaraColors.secondarySoft,
+                side: BorderSide(
+                  color: WicaraColors.secondary.withValues(alpha: 0.24),
+                ),
+                visualDensity: VisualDensity.compact,
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
 class _AssistantMessageFrame extends StatelessWidget {
   const _AssistantMessageFrame({required this.child});
 
