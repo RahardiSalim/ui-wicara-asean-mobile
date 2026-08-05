@@ -79,7 +79,7 @@ class ApiClient {
           .timeout(timeout);
     } on TimeoutException {
       throw ApiClientException(
-        'Cannot reach the WICARA server at $baseUrl. Check the API URL and server status.',
+        'The WICARA server took too long to respond. Please try again.',
       );
     } on http.ClientException catch (error) {
       throw ApiClientException(
