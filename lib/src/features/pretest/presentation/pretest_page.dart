@@ -327,7 +327,7 @@ class _PretestPageState extends State<PretestPage> {
       return _PretestStateView(
         constraints: constraints,
         title: 'Loading pretest',
-        message: 'Generating adaptive questions on local AI...',
+        message: 'Preparing adaptive questions...',
       );
     }
     if (_questionError != null || _question == null) {
@@ -486,8 +486,7 @@ class _QuestionStage extends StatelessWidget {
       question.topic,
       question.prompt,
       question.helper,
-      for (final option in question.options)
-        '${option.label}. ${option.text}',
+      for (final option in question.options) '${option.label}. ${option.text}',
     ].where((part) => part.trim().isNotEmpty).join('. ');
     return SingleChildScrollView(
       padding: EdgeInsets.fromLTRB(
@@ -1910,66 +1909,68 @@ class _ReasoningInput extends StatelessWidget {
           children: [
             Expanded(
               child: TextField(
-            controller: controller,
-            minLines: 1,
-            maxLines: 2,
-            decoration: InputDecoration(
-              hintText: 'Type your method, or leave empty to submit...',
-              filled: true,
-              fillColor: WicaraColors.fieldFill,
-              contentPadding: const EdgeInsets.symmetric(
-                horizontal: 15,
-                vertical: 16,
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(13),
-                borderSide: const BorderSide(
-                  color: WicaraColors.secondaryLight,
-                  width: 1.4,
+                controller: controller,
+                minLines: 1,
+                maxLines: 2,
+                decoration: InputDecoration(
+                  hintText: 'Type your method, or leave empty to submit...',
+                  filled: true,
+                  fillColor: WicaraColors.fieldFill,
+                  contentPadding: const EdgeInsets.symmetric(
+                    horizontal: 15,
+                    vertical: 16,
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(13),
+                    borderSide: const BorderSide(
+                      color: WicaraColors.secondaryLight,
+                      width: 1.4,
+                    ),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(13),
+                    borderSide: const BorderSide(
+                      color: WicaraColors.secondary,
+                      width: 1.7,
+                    ),
+                  ),
                 ),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(13),
-                borderSide: const BorderSide(
-                  color: WicaraColors.secondary,
-                  width: 1.7,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: WicaraColors.text,
+                  fontWeight: FontWeight.w700,
                 ),
-              ),
-            ),
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: WicaraColors.text,
-              fontWeight: FontWeight.w700,
-            ),
               ),
             ),
             const SizedBox(width: 12),
             Container(
-          width: 53,
-          height: 53,
-          decoration: BoxDecoration(
-            color: WicaraColors.secondary,
-            borderRadius: BorderRadius.circular(27),
-            boxShadow: [
-              BoxShadow(
-                color: WicaraColors.secondary.withValues(alpha: 0.24),
-                blurRadius: 16,
-                offset: const Offset(0, 9),
+              width: 53,
+              height: 53,
+              decoration: BoxDecoration(
+                color: WicaraColors.secondary,
+                borderRadius: BorderRadius.circular(27),
+                boxShadow: [
+                  BoxShadow(
+                    color: WicaraColors.secondary.withValues(alpha: 0.24),
+                    blurRadius: 16,
+                    offset: const Offset(0, 9),
+                  ),
+                ],
               ),
-            ],
-          ),
               child: IconButton(
-            onPressed: isSubmitting ? null : onSubmit,
-            icon: isSubmitting
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2.2,
-                      valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                    ),
-                  )
-                : const Icon(Icons.arrow_upward_rounded),
-            color: Colors.white,
+                onPressed: isSubmitting ? null : onSubmit,
+                icon: isSubmitting
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2.2,
+                          valueColor: AlwaysStoppedAnimation<Color>(
+                            Colors.white,
+                          ),
+                        ),
+                      )
+                    : const Icon(Icons.arrow_upward_rounded),
+                color: Colors.white,
               ),
             ),
           ],
