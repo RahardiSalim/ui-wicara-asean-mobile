@@ -91,6 +91,13 @@ class ApiPretestRepository implements PretestRepository {
         'Backend returned no next question or diagnosis.',
       );
     } on ApiClientException catch (error) {
+      if (_isQuestionAlreadyAnswered(error)) {
+        final currentQuestion = await fetchCurrentQuestion();
+        return PretestAnswerResult(
+          completed: false,
+          nextQuestion: currentQuestion,
+        );
+      }
       throw PretestException(error.message);
     }
   }
@@ -144,6 +151,12 @@ class ApiPretestRepository implements PretestRepository {
     }
     return sessionId;
   }
+}
+
+bool _isQuestionAlreadyAnswered(ApiClientException error) {
+  final detail = error.detail;
+  return detail is Map &&
+      detail['error']?.toString() == 'QUESTION_ALREADY_ANSWERED';
 }
 
 PretestQuestion questionFromJson(Map<String, dynamic> json) {
