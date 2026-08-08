@@ -1,4 +1,3 @@
-import '../../../core/utils/learning_level_resolver.dart';
 import '../../pretest/domain/pretest_models.dart';
 import '../../workspace/domain/workspace_models.dart';
 
@@ -92,22 +91,7 @@ class HomeSnapshot {
       }
     }
 
-    if (isElementaryLevel(
-      educationLevel: educationLevel,
-      gradeLevel: gradeLevel,
-    )) {
-      return const WorkspaceRouteArguments(
-        trackId: 'demo-track-sd',
-        moduleId: 'demo-module-perkalian',
-        moduleTitle: 'Perkalian',
-      );
-    }
-
-    return const WorkspaceRouteArguments(
-      trackId: 'demo-track-smp',
-      moduleId: 'demo-module-aljabar',
-      moduleTitle: 'Aljabar dan pembuktian Al-Khawarizmi',
-    );
+    return null;
   }
 }
 
@@ -558,18 +542,22 @@ class AdaptivePosttestResult {
     required this.status,
     required this.nodeResults,
     required this.retakeRequiredConcepts,
+    this.progression,
   });
 
   final String sessionId;
   final String status;
   final List<PosttestNodeResult> nodeResults;
   final List<String> retakeRequiredConcepts;
+  final PosttestProgression? progression;
 
   int get totalNodeCount => nodeResults.length;
 
   int get passedNodeCount => nodeResults.where((node) => node.passed).length;
 
-  bool get passed => totalNodeCount > 0 && passedNodeCount == totalNodeCount;
+  bool get passed =>
+      progression?.passed ??
+      (totalNodeCount > 0 && passedNodeCount == totalNodeCount);
 
   double get answerPercent =>
       _averagePercent(nodeResults.map((node) => node.answerPercent));
@@ -582,6 +570,38 @@ class AdaptivePosttestResult {
 
   double get confidencePercent =>
       _averagePercent(nodeResults.map((node) => node.confidencePercent));
+}
+
+class PosttestProgression {
+  const PosttestProgression({
+    required this.passed,
+    this.trackId,
+    this.trackStatus,
+    this.trackProgressPercent,
+    this.moduleId,
+    this.moduleStatus,
+    this.nextModuleId,
+    this.nextModuleStatus,
+    this.workspaceSessionId,
+    this.workspaceStatus,
+    this.goalStatus,
+    this.remediationPhase,
+    this.remediationReason,
+  });
+
+  final bool passed;
+  final String? trackId;
+  final String? trackStatus;
+  final int? trackProgressPercent;
+  final String? moduleId;
+  final String? moduleStatus;
+  final String? nextModuleId;
+  final String? nextModuleStatus;
+  final String? workspaceSessionId;
+  final String? workspaceStatus;
+  final String? goalStatus;
+  final String? remediationPhase;
+  final String? remediationReason;
 }
 
 class WeeklyLearningReport {

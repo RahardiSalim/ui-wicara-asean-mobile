@@ -43,10 +43,7 @@ abstract class WorkspaceRepository {
     Map<String, dynamic> metadata = const {},
   });
 
-  Future<WorkspaceSession> advancePhase({
-    required String workspaceId,
-    bool force = false,
-  });
+  Future<WorkspaceSession> advancePhase({required String workspaceId});
 
   Future<WorkspaceSession> startPosttest({required String workspaceId});
 

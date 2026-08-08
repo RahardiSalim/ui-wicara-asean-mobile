@@ -1,8 +1,6 @@
 import '../../../core/network/api_client.dart';
-import '../../../core/utils/learning_level_resolver.dart';
 import '../../auth/data/auth_session_store.dart';
 import '../../pretest/data/api_pretest_repository.dart';
-import '../../pretest/data/pretest_session_store.dart';
 import '../../pretest/domain/pretest_models.dart';
 import '../domain/home_repository.dart';
 import '../domain/home_snapshot.dart';
@@ -44,12 +42,6 @@ class ApiHomeRepository implements HomeRepository {
         .map(_subjectKey)
         .toList(growable: false);
     final backendTracks = _trackSummaries(homeJson['active_tracks']);
-    final effectiveTracks = _withLocalPretestFallbackTrack(
-      tracks: backendTracks,
-      educationLevel: _string(profileJson['education_level']),
-      gradeLevel: _string(profileJson['grade_level']),
-      selectedSubjects: selectedSubjects,
-    );
 
     return HomeSnapshot(
       displayName: _string(homeJson['display_name']).isNotEmpty
@@ -70,7 +62,7 @@ class ApiHomeRepository implements HomeRepository {
       availableSubjects: _subjectKeys(subjectsJson),
       onboardingCompleted: profileJson['onboarding_completed'] == true,
       nextQueueItem: _queueItemOrNull(homeJson['next_queue_item']),
-      activeTracks: effectiveTracks,
+      activeTracks: backendTracks,
       mediaArtifacts: _mediaArtifactsFromList(mediaArtifactsJson['items']),
     );
   }
@@ -466,6 +458,28 @@ class ApiHomeRepository implements HomeRepository {
       status: _stringWithFallback(json['status'], 'completed'),
       nodeResults: _posttestNodesFromJson(nodeResults),
       retakeRequiredConcepts: _stringList(json['retake_required_concepts']),
+      progression: _posttestProgressionFromJson(json['progression']),
+    );
+  }
+
+  PosttestProgression? _posttestProgressionFromJson(Object? value) {
+    if (value is! Map<String, dynamic>) {
+      return null;
+    }
+    return PosttestProgression(
+      passed: value['passed'] == true,
+      trackId: _nullableString(value['track_id']),
+      trackStatus: _nullableString(value['track_status']),
+      trackProgressPercent: _nullableInt(value['track_progress_percent']),
+      moduleId: _nullableString(value['module_id']),
+      moduleStatus: _nullableString(value['module_status']),
+      nextModuleId: _nullableString(value['next_module_id']),
+      nextModuleStatus: _nullableString(value['next_module_status']),
+      workspaceSessionId: _nullableString(value['workspace_session_id']),
+      workspaceStatus: _nullableString(value['workspace_status']),
+      goalStatus: _nullableString(value['goal_status']),
+      remediationPhase: _nullableString(value['remediation_phase']),
+      remediationReason: _nullableString(value['remediation_reason']),
     );
   }
 
@@ -598,111 +612,6 @@ class ApiHomeRepository implements HomeRepository {
           ),
         )
         .toList(growable: false);
-  }
-
-  List<LearningTrackSummary> _withLocalPretestFallbackTrack({
-    required List<LearningTrackSummary> tracks,
-    required String educationLevel,
-    required String gradeLevel,
-    required List<String> selectedSubjects,
-  }) {
-    final currentDraft = _currentDraftFromSession(
-      educationLevel: educationLevel,
-      gradeLevel: gradeLevel,
-    );
-    final drafts = <LocalTrackDraft>[
-      ...pretestSessionStore.localTrackHistory,
-    ];
-    if (currentDraft != null) {
-      drafts.add(currentDraft);
-    }
-    if (drafts.isEmpty) {
-      return tracks;
-    }
-
-    final merged = <LearningTrackSummary>[...tracks];
-    final existingIds = merged.map((track) => track.id).toSet();
-    for (final draft in drafts) {
-      if (draft.trackId.trim().isEmpty || existingIds.contains(draft.trackId)) {
-        continue;
-      }
-      final subjectLabel = _resolveLocalGoalSubjectLabel(
-        selectedSubjects,
-        draftSubjectCode: draft.subjectCode,
-      );
-      merged.add(
-        LearningTrackSummary(
-          id: draft.trackId,
-          subjectCode: draft.subjectCode.isNotEmpty
-              ? draft.subjectCode
-              : subjectLabel,
-          subjectName: subjectLabel,
-          title: draft.conceptTitle.isNotEmpty
-              ? draft.conceptTitle
-              : _titleFromCode(draft.conceptCode),
-          status: 'ready',
-          progressPercent: 0,
-          modules: [
-            LearningTrackModuleSummary(
-              id: draft.moduleId,
-              title: draft.moduleTitle,
-              description:
-                  'Lanjutkan pembelajaran dari hasil diagnosis pretest on-device.',
-              status: 'ready',
-              estimatedMinutes: 15,
-            ),
-          ],
-        ),
-      );
-      existingIds.add(draft.trackId);
-    }
-    return merged;
-  }
-
-  LocalTrackDraft? _currentDraftFromSession({
-    required String educationLevel,
-    required String gradeLevel,
-  }) {
-    final trackId = _string(pretestSessionStore.trackId);
-    final learningGoalId = _string(pretestSessionStore.learningGoalId);
-    final conceptCode = _string(pretestSessionStore.targetConceptCode);
-    if (trackId.isEmpty || learningGoalId.isEmpty || conceptCode.isEmpty) {
-      return null;
-    }
-    final isElementary = isElementaryLevel(
-      educationLevel: educationLevel,
-      gradeLevel: gradeLevel,
-    );
-    return LocalTrackDraft(
-      trackId: trackId,
-      learningGoalId: learningGoalId,
-      conceptCode: conceptCode,
-      conceptTitle: _titleFromCode(conceptCode),
-      subjectCode: _string(pretestSessionStore.targetSubjectCode),
-      moduleId: isElementary ? 'demo-module-perkalian' : 'demo-module-aljabar',
-      moduleTitle: isElementary
-          ? 'Perkalian'
-          : 'Aljabar dan pembuktian Al-Khawarizmi',
-      createdAtIso: DateTime.now().toUtc().toIso8601String(),
-    );
-  }
-
-  String _resolveLocalGoalSubjectLabel(
-    List<String> selectedSubjects, {
-    String draftSubjectCode = '',
-  }) {
-    final fromDraft = _string(draftSubjectCode);
-    if (fromDraft.isNotEmpty) {
-      return _subjectKey(fromDraft);
-    }
-    final fromSession = _string(pretestSessionStore.targetSubjectCode);
-    if (fromSession.isNotEmpty) {
-      return _subjectKey(fromSession);
-    }
-    if (selectedSubjects.isNotEmpty) {
-      return selectedSubjects.first;
-    }
-    return 'Math';
   }
 
   List<LearningTrackModuleSummary> _moduleSummaries(Object? value) {

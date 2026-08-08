@@ -292,10 +292,7 @@ class _UnavailableWorkspaceRepository implements WorkspaceRepository {
   }
 
   @override
-  Future<WorkspaceSession> advancePhase({
-    required String workspaceId,
-    bool force = false,
-  }) {
+  Future<WorkspaceSession> advancePhase({required String workspaceId}) {
     throw UnimplementedError('WorkspaceRepository is not configured.');
   }
 
