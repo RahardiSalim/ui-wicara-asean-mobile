@@ -214,6 +214,10 @@ void main() {
       await tester.ensureVisible(find.text(answer));
       await tester.tap(find.text(answer));
       await tester.pumpAndSettle();
+      final confidence = find.byKey(const ValueKey('posttest-confidence-8'));
+      await tester.ensureVisible(confidence);
+      await tester.tap(confidence);
+      await tester.pumpAndSettle();
       final isLastAnswer = answer == '40';
       await tester.ensureVisible(
         find.text(isLastAnswer ? 'Finish posttest' : 'Continue'),
