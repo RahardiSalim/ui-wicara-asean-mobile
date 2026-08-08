@@ -196,7 +196,11 @@ KnowledgeState knowledgeStateFromDiagnosis(Map<String, dynamic> diagnosis) {
   final recommendedFocus = analysis is Map
       ? _stringList(analysis['recommended_focus'])
       : const <String>[];
-  final masteryScore = _percentToUnit(scorePercent);
+  final masteryPercent =
+      _double(diagnosis['target_mastery_estimate_percent']) ??
+      _double(diagnosis['adaptive_mastery_estimate_percent']) ??
+      scorePercent;
+  final masteryScore = _percentToUnit(masteryPercent);
   final overallMasteryPercent =
       _int(diagnosis['overall_mastery_percent']) ??
       (analysis is Map ? _int(analysis['overall_mastery_percent']) : null);
