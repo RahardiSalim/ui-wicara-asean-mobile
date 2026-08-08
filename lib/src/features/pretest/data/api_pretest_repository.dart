@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import '../../../core/network/api_client.dart';
 import '../../auth/data/auth_session_store.dart';
 import '../domain/pretest_models.dart';
@@ -98,6 +100,34 @@ class ApiPretestRepository implements PretestRepository {
           nextQuestion: currentQuestion,
         );
       }
+      throw PretestException(error.message);
+    }
+  }
+
+  @override
+  Future<String> uploadEvidenceImage({
+    required Uint8List bytes,
+    required String filename,
+    required String mimeType,
+  }) async {
+    final token = _requireToken();
+    try {
+      final json = await _apiClient.postMultipartBytes(
+        '/api/v1/evidence/image-assets/upload',
+        bytes: bytes,
+        filename: filename,
+        mimeType: mimeType,
+        headers: {'Authorization': 'Bearer $token'},
+        timeout: _pretestRequestTimeout,
+      );
+      final assetId = _string(json['id']);
+      if (assetId.isEmpty) {
+        throw const PretestException(
+          'Backend returned an invalid evidence image.',
+        );
+      }
+      return assetId;
+    } on ApiClientException catch (error) {
       throw PretestException(error.message);
     }
   }

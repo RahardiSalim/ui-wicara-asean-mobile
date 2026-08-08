@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import '../domain/pretest_models.dart';
 import '../domain/pretest_repository.dart';
 
@@ -71,6 +73,16 @@ class MockPretestRepository implements PretestRepository {
         pathOptions: ['review_only', 'target_reinforcement'],
       ),
     );
+  }
+
+  @override
+  Future<String> uploadEvidenceImage({
+    required Uint8List bytes,
+    required String filename,
+    required String mimeType,
+  }) async {
+    await Future<void>.delayed(delay);
+    return 'mock-evidence-image';
   }
 
   @override

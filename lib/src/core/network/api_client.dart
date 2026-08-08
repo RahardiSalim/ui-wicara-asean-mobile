@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
+import 'package:http_parser/http_parser.dart';
 
 class ApiClient {
   ApiClient({required this.baseUrl, http.Client? httpClient})
@@ -106,6 +108,57 @@ class ApiClient {
     return decoded;
   }
 
+  Future<Map<String, dynamic>> postMultipartBytes(
+    String path, {
+    required Uint8List bytes,
+    required String filename,
+    required String mimeType,
+    String fieldName = 'file',
+    Map<String, String>? headers,
+    Duration timeout = defaultPostTimeout,
+  }) async {
+    final uri = Uri.parse(baseUrl).replace(path: path);
+    final request = http.MultipartRequest('POST', uri)
+      ..headers.addAll({..._buildHeaders(), ...?headers})
+      ..files.add(
+        http.MultipartFile.fromBytes(
+          fieldName,
+          bytes,
+          filename: filename,
+          contentType: _mediaType(mimeType),
+        ),
+      );
+    final http.Response response;
+    try {
+      response = await _httpClient
+          .send(request)
+          .then(http.Response.fromStream)
+          .timeout(timeout);
+    } on TimeoutException {
+      throw ApiClientException(
+        'The WICARA server took too long to upload the image. Please try again.',
+      );
+    } on http.ClientException catch (error) {
+      throw ApiClientException(
+        'Cannot reach the WICARA server at $baseUrl. ${error.message}',
+      );
+    }
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      final (message, rawDetail) = _errorMessageAndDetail(
+        response,
+        method: 'POST',
+        uri: uri,
+      );
+      throw ApiClientException(message, detail: rawDetail);
+    }
+    final decoded = jsonDecode(response.body);
+    if (decoded is! Map<String, dynamic>) {
+      throw const ApiClientException('Expected a JSON object response.');
+    }
+    return decoded;
+  }
+
   Future<Map<String, dynamic>> putJson(
     String path, {
     Map<String, String>? queryParameters,
@@ -176,6 +229,14 @@ class ApiClient {
       if (_authToken != null) 'Authorization': 'Bearer $_authToken',
     };
   }
+}
+
+MediaType _mediaType(String value) {
+  final parts = value.split('/');
+  return MediaType(
+    parts.isNotEmpty ? parts.first : 'application',
+    parts.length > 1 ? parts[1] : 'octet-stream',
+  );
 }
 
 /// Returns (humanMessage, rawDetail) for an error response.

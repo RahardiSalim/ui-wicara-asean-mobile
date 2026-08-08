@@ -419,10 +419,12 @@ void main() {
     await tester.ensureVisible(find.text('Add reasoning / sketch'));
     await tester.tap(find.text('Add reasoning / sketch'));
     await tester.pumpAndSettle();
-    expect(find.text('Add reasoning or canvas work'), findsOneWidget);
+    expect(find.text('Work evidence'), findsOneWidget);
+    expect(find.text('Upload work image'), findsOneWidget);
 
     await tester.enterText(find.byType(TextField).last, '4 groups of 3 is 12');
-    await tester.tap(find.byIcon(Icons.arrow_upward_rounded));
+    await tester.ensureVisible(find.text('Submit answer with evidence'));
+    await tester.tap(find.text('Submit answer with evidence'));
     await tester.pumpAndSettle();
     expect(find.text('22'), findsOneWidget);
 
@@ -437,7 +439,8 @@ void main() {
       find.byType(TextField).last,
       '6 x 4 is 24, minus 2 is 22',
     );
-    await tester.tap(find.byIcon(Icons.arrow_upward_rounded));
+    await tester.ensureVisible(find.text('Submit answer with evidence'));
+    await tester.tap(find.text('Submit answer with evidence'));
     await tester.pumpAndSettle();
 
     expect(find.text('Your knowledge state'), findsOneWidget);

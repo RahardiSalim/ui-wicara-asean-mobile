@@ -1,5 +1,7 @@
 import 'dart:math' as math;
+import 'dart:typed_data';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../../../app/app_routes.dart';
@@ -13,11 +15,18 @@ import '../../review/presentation/flag_review_button.dart';
 import '../domain/pretest_models.dart';
 import '../domain/pretest_repository.dart';
 import 'widgets/assessment_option_tile.dart';
-import 'widgets/fishbone_canvas.dart';
 import 'widgets/knowledge_state_card.dart';
 import 'widgets/rich_math_text.dart';
 
-enum _PretestStage { question, reasoning, result }
+enum _PretestStage { question, result }
+
+String _imageMimeType(String? extension) {
+  return switch ((extension ?? '').trim().toLowerCase()) {
+    'jpg' || 'jpeg' => 'image/jpeg',
+    'webp' => 'image/webp',
+    _ => 'image/png',
+  };
+}
 
 class PretestPage extends StatefulWidget {
   const PretestPage({
@@ -42,10 +51,14 @@ class _PretestPageState extends State<PretestPage> {
   PretestQuestion? _question;
   String _selectedOptionId = '';
   bool _isSubmitting = false;
+  bool _isUploadingEvidence = false;
   bool _isLoadingQuestion = true;
   String? _questionError;
   KnowledgeState? _knowledgeState;
-  final List<CanvasWorkSnapshot> _canvasSnapshots = [];
+  bool _showInlineEvidence = false;
+  Uint8List? _evidenceImageBytes;
+  String? _evidenceImageName;
+  String? _evidenceImageMimeType;
 
   @override
   void initState() {
@@ -66,7 +79,11 @@ class _PretestPageState extends State<PretestPage> {
       _question = null;
       _selectedOptionId = '';
       _knowledgeState = null;
-      _canvasSnapshots.clear();
+      _showInlineEvidence = false;
+      _evidenceImageBytes = null;
+      _evidenceImageName = null;
+      _evidenceImageMimeType = null;
+      _reasoningController.clear();
       _isLoadingQuestion = true;
     });
     try {
@@ -106,22 +123,80 @@ class _PretestPageState extends State<PretestPage> {
       _showMessage('Pilih jawaban sebelum tambah cara.');
       return;
     }
-    setState(() => _stage = _PretestStage.reasoning);
+    setState(() => _showInlineEvidence = !_showInlineEvidence);
+  }
+
+  Future<void> _pickEvidenceImage() async {
+    final result = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: const ['jpg', 'jpeg', 'png', 'webp'],
+      withData: true,
+    );
+    if (!mounted || result == null || result.files.isEmpty) {
+      return;
+    }
+    final file = result.files.single;
+    final bytes = file.bytes;
+    if (bytes == null || bytes.isEmpty) {
+      _showMessage('File gambar tidak dapat dibaca.');
+      return;
+    }
+    if (bytes.length > 10 * 1024 * 1024) {
+      _showMessage('Ukuran gambar maksimal 10 MB.');
+      return;
+    }
+    setState(() {
+      _evidenceImageBytes = bytes;
+      _evidenceImageName = file.name;
+      _evidenceImageMimeType = _imageMimeType(file.extension);
+      _showInlineEvidence = true;
+    });
+  }
+
+  void _removeEvidenceImage() {
+    setState(() {
+      _evidenceImageBytes = null;
+      _evidenceImageName = null;
+      _evidenceImageMimeType = null;
+    });
   }
 
   Future<void> _submitReasoning() async {
-    if (_isSubmitting) {
+    if (_isSubmitting || _isUploadingEvidence) {
       return;
+    }
+    String? imageAssetId;
+    final imageBytes = _evidenceImageBytes;
+    if (imageBytes != null) {
+      setState(() => _isUploadingEvidence = true);
+      try {
+        imageAssetId = await widget.pretestRepository.uploadEvidenceImage(
+          bytes: imageBytes,
+          filename: _evidenceImageName ?? 'work.png',
+          mimeType: _evidenceImageMimeType ?? 'image/png',
+        );
+      } on PretestException catch (error) {
+        if (mounted) {
+          setState(() => _isUploadingEvidence = false);
+        }
+        _showMessage(error.message);
+        return;
+      }
+      if (mounted) {
+        setState(() => _isUploadingEvidence = false);
+      }
     }
     await _submitCurrentAnswer(
       typedReasoning: _reasoningController.text,
-      usedCanvas: _canvasSnapshots.isNotEmpty,
+      usedCanvas: imageAssetId != null,
+      canvasAssetId: imageAssetId,
     );
   }
 
   Future<void> _submitCurrentAnswer({
     required String typedReasoning,
     required bool usedCanvas,
+    String? canvasAssetId,
   }) async {
     if (_isSubmitting) {
       return;
@@ -134,6 +209,7 @@ class _PretestPageState extends State<PretestPage> {
           optionId: _selectedOptionId,
           confidence: 0,
           typedReasoning: typedReasoning,
+          canvasAssetId: canvasAssetId,
           usedCanvas: usedCanvas,
         ),
       );
@@ -146,7 +222,10 @@ class _PretestPageState extends State<PretestPage> {
           _question = null;
           _selectedOptionId = '';
           _reasoningController.clear();
-          _canvasSnapshots.clear();
+          _showInlineEvidence = false;
+          _evidenceImageBytes = null;
+          _evidenceImageName = null;
+          _evidenceImageMimeType = null;
           _stage = _PretestStage.result;
         });
       } else if (result.nextQuestion != null) {
@@ -154,7 +233,10 @@ class _PretestPageState extends State<PretestPage> {
           _question = result.nextQuestion;
           _selectedOptionId = '';
           _reasoningController.clear();
-          _canvasSnapshots.clear();
+          _showInlineEvidence = false;
+          _evidenceImageBytes = null;
+          _evidenceImageName = null;
+          _evidenceImageMimeType = null;
           _stage = _PretestStage.question;
         });
       }
@@ -170,33 +252,12 @@ class _PretestPageState extends State<PretestPage> {
     }
   }
 
-  PretestOption get _selectedOption =>
-      _question!.options.firstWhere((option) => option.id == _selectedOptionId);
-
   void _showMessage(String message) {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(
         SnackBar(content: Text(message), behavior: SnackBarBehavior.floating),
       );
-  }
-
-  void _handleCanvasSentToChat(CanvasWorkSnapshot snapshot) {
-    setState(() => _canvasSnapshots.add(snapshot));
-  }
-
-  void _goBack() {
-    if (_stage == _PretestStage.reasoning) {
-      setState(() => _stage = _PretestStage.question);
-      return;
-    }
-    if (_stage == _PretestStage.result) {
-      setState(() => _stage = _PretestStage.question);
-      return;
-    }
-    Navigator.of(
-      context,
-    ).pushNamedAndRemoveUntil(AppRoutes.home, (route) => false);
   }
 
   Future<void> _selectPathAndGoHome() async {
@@ -236,59 +297,6 @@ class _PretestPageState extends State<PretestPage> {
     Navigator.of(
       context,
     ).pushNamedAndRemoveUntil(AppRoutes.home, (route) => false);
-  }
-
-  void _openLargeCanvas() {
-    showDialog<void>(
-      context: context,
-      builder: (context) {
-        return Dialog(
-          insetPadding: EdgeInsets.zero,
-          backgroundColor: WicaraColors.pageBackground,
-          surfaceTintColor: WicaraColors.pageBackground,
-          child: SizedBox.expand(
-            child: SafeArea(
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final horizontalPadding = constraints.maxWidth > 640
-                      ? 28.0
-                      : 12.0;
-                  final verticalPadding = constraints.maxHeight > 700
-                      ? 24.0
-                      : 12.0;
-                  final availableWidth = math.max(
-                    0.0,
-                    constraints.maxWidth - horizontalPadding * 2,
-                  );
-                  final availableHeight = math.max(
-                    0.0,
-                    constraints.maxHeight - verticalPadding * 2,
-                  );
-                  final canvasWidth = math.min(availableWidth, 860.0);
-                  final canvasHeight = math.min(
-                    math.max(availableHeight, 220.0),
-                    constraints.maxHeight,
-                  );
-
-                  return Center(
-                    child: SizedBox(
-                      width: canvasWidth,
-                      height: canvasHeight,
-                      child: FishboneCanvas(
-                        height: canvasHeight,
-                        isLargePanel: true,
-                        onOpenLargePanel: () => Navigator.of(context).pop(),
-                        onSendToChat: _handleCanvasSentToChat,
-                      ),
-                    ),
-                  );
-                },
-              ),
-            ),
-          ),
-        );
-      },
-    );
   }
 
   @override
@@ -359,7 +367,18 @@ class _PretestPageState extends State<PretestPage> {
             .clamp(0.0, 1.0)
             .toDouble(),
         selectedOptionId: _selectedOptionId,
-        isSubmitting: _isSubmitting,
+        isSubmitting: _isSubmitting || _isUploadingEvidence,
+        submissionMessage: _isUploadingEvidence
+            ? (copy.isIndonesian
+                  ? 'Mengupload foto pekerjaan...'
+                  : 'Uploading your work image...')
+            : (copy.isIndonesian
+                  ? 'Jawaban dikirim. Menilai langkah dan menyiapkan soal berikutnya...'
+                  : 'Answer sent. Evaluating your work and preparing the next question...'),
+        showEvidence: _showInlineEvidence,
+        reasoningController: _reasoningController,
+        evidenceImageBytes: _evidenceImageBytes,
+        evidenceImageName: _evidenceImageName,
         onClose: _leavePretest,
         onSelected: (id) => setState(() => _selectedOptionId = id),
         submitLabel: copy.isIndonesian ? 'Kirim jawaban' : 'Submit answer',
@@ -368,18 +387,9 @@ class _PretestPageState extends State<PretestPage> {
             : 'Add reasoning / sketch',
         onSubmit: _submitAnswer,
         onAddEvidence: _openReasoning,
-      ),
-      _PretestStage.reasoning => _ReasoningStage(
-        constraints: constraints,
-        copy: copy,
-        question: question,
-        selectedOption: _selectedOption,
-        controller: _reasoningController,
-        canvasSnapshots: _canvasSnapshots,
-        isSubmitting: _isSubmitting,
-        onBack: _goBack,
-        onUseCanvas: _openLargeCanvas,
-        onSubmit: _submitReasoning,
+        onPickImage: _pickEvidenceImage,
+        onRemoveImage: _removeEvidenceImage,
+        onSubmitEvidence: _submitReasoning,
       ),
       _PretestStage.result => const SizedBox.shrink(),
     };
@@ -460,12 +470,20 @@ class _QuestionStage extends StatelessWidget {
     required this.progressValue,
     required this.selectedOptionId,
     required this.isSubmitting,
+    required this.submissionMessage,
+    required this.showEvidence,
+    required this.reasoningController,
+    required this.evidenceImageBytes,
+    required this.evidenceImageName,
     required this.onClose,
     required this.onSelected,
     required this.submitLabel,
     required this.addEvidenceLabel,
     required this.onSubmit,
     required this.onAddEvidence,
+    required this.onPickImage,
+    required this.onRemoveImage,
+    required this.onSubmitEvidence,
     this.reviewRepository,
   });
 
@@ -476,12 +494,20 @@ class _QuestionStage extends StatelessWidget {
   final double progressValue;
   final String selectedOptionId;
   final bool isSubmitting;
+  final String submissionMessage;
+  final bool showEvidence;
+  final TextEditingController reasoningController;
+  final Uint8List? evidenceImageBytes;
+  final String? evidenceImageName;
   final VoidCallback onClose;
   final ValueChanged<String> onSelected;
   final String submitLabel;
   final String addEvidenceLabel;
   final VoidCallback onSubmit;
   final VoidCallback onAddEvidence;
+  final VoidCallback onPickImage;
+  final VoidCallback onRemoveImage;
+  final VoidCallback onSubmitEvidence;
 
   @override
   Widget build(BuildContext context) {
@@ -627,13 +653,31 @@ class _QuestionStage extends StatelessWidget {
                     onPressed: selectedOptionId.isEmpty ? null : onSubmit,
                     isLoading: isSubmitting,
                   ),
+                  if (isSubmitting) ...[
+                    const SizedBox(height: 9),
+                    Text(
+                      submissionMessage,
+                      textAlign: TextAlign.center,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: WicaraColors.muted,
+                        fontWeight: FontWeight.w600,
+                        height: 1.3,
+                      ),
+                    ),
+                  ],
                   const SizedBox(height: 10),
                   OutlinedButton.icon(
                     onPressed: selectedOptionId.isEmpty || isSubmitting
                         ? null
                         : onAddEvidence,
                     icon: const Icon(Icons.edit_note_rounded, size: 20),
-                    label: Text(addEvidenceLabel),
+                    label: Text(
+                      showEvidence
+                          ? (copy.isIndonesian
+                                ? 'Tutup cara pengerjaan'
+                                : 'Hide work evidence')
+                          : addEvidenceLabel,
+                    ),
                     style: OutlinedButton.styleFrom(
                       foregroundColor: WicaraColors.secondaryDeep,
                       side: const BorderSide(
@@ -645,6 +689,19 @@ class _QuestionStage extends StatelessWidget {
                       padding: const EdgeInsets.symmetric(vertical: 13),
                     ),
                   ),
+                  if (showEvidence) ...[
+                    const SizedBox(height: 14),
+                    _InlineEvidencePanel(
+                      copy: copy,
+                      controller: reasoningController,
+                      imageBytes: evidenceImageBytes,
+                      imageName: evidenceImageName,
+                      isSubmitting: isSubmitting,
+                      onPickImage: onPickImage,
+                      onRemoveImage: onRemoveImage,
+                      onSubmit: onSubmitEvidence,
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -657,205 +714,148 @@ class _QuestionStage extends StatelessWidget {
   }
 }
 
-class _ReasoningStage extends StatelessWidget {
-  const _ReasoningStage({
-    required this.constraints,
+class _InlineEvidencePanel extends StatelessWidget {
+  const _InlineEvidencePanel({
     required this.copy,
-    required this.question,
-    required this.selectedOption,
     required this.controller,
-    required this.canvasSnapshots,
+    required this.imageBytes,
+    required this.imageName,
     required this.isSubmitting,
-    required this.onBack,
-    required this.onUseCanvas,
+    required this.onPickImage,
+    required this.onRemoveImage,
     required this.onSubmit,
   });
 
-  final BoxConstraints constraints;
   final OnboardingCopy copy;
-  final PretestQuestion question;
-  final PretestOption selectedOption;
   final TextEditingController controller;
-  final List<CanvasWorkSnapshot> canvasSnapshots;
+  final Uint8List? imageBytes;
+  final String? imageName;
   final bool isSubmitting;
-  final VoidCallback onBack;
-  final VoidCallback onUseCanvas;
+  final VoidCallback onPickImage;
+  final VoidCallback onRemoveImage;
   final VoidCallback onSubmit;
 
   @override
   Widget build(BuildContext context) {
-    final compact = constraints.maxHeight < 700;
-    final horizontalPadding = constraints.maxWidth < 360 ? 18.0 : 28.0;
-    return SizedBox(
-      height: math.max(0.0, constraints.maxHeight),
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: WicaraColors.pageBackground,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: WicaraColors.secondaryLight),
+      ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Expanded(
-            child: SingleChildScrollView(
-              padding: EdgeInsets.fromLTRB(
-                horizontalPadding,
-                compact ? 10 : 14,
-                horizontalPadding,
-                18,
+          Text(
+            copy.isIndonesian ? 'Cara pengerjaan' : 'Work evidence',
+            style: Theme.of(context).textTheme.titleSmall?.copyWith(
+              color: WicaraColors.text,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          const SizedBox(height: 5),
+          Text(
+            copy.isIndonesian
+                ? 'Tulis langkahmu, upload foto pekerjaan, atau gunakan keduanya. Foto akan dibaca AI sebagai langkah pengerjaan.'
+                : 'Type your steps, upload a photo of your work, or use both. AI will read the image as solution steps.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: WicaraColors.muted,
+              fontWeight: FontWeight.w600,
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: controller,
+            enabled: !isSubmitting,
+            minLines: 3,
+            maxLines: 6,
+            decoration: InputDecoration(
+              hintText: copy.isIndonesian
+                  ? 'Tulis langkah pengerjaanmu...'
+                  : 'Write your solution steps...',
+              filled: true,
+              fillColor: Colors.white,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: WicaraColors.line),
+              ),
+              enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: const BorderSide(color: WicaraColors.line),
+              ),
+            ),
+          ),
+          const SizedBox(height: 11),
+          if (imageBytes == null)
+            OutlinedButton.icon(
+              onPressed: isSubmitting ? null : onPickImage,
+              icon: const Icon(Icons.add_photo_alternate_outlined),
+              label: Text(
+                copy.isIndonesian
+                    ? 'Upload foto pekerjaan'
+                    : 'Upload work image',
+              ),
+            )
+          else
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: WicaraColors.line),
               ),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  _AssessmentHeader(
-                    leading: Icons.chevron_left_rounded,
-                    onLeadingPressed: onBack,
-                  ),
-                  SizedBox(height: compact ? 22 : 48),
-                  Text(
-                    copy.isIndonesian
-                        ? 'Tambah cara atau coretan'
-                        : 'Add reasoning or canvas work',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      fontSize: 22,
-                      height: 1.14,
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(9),
+                    child: Image.memory(
+                      imageBytes!,
+                      height: 170,
+                      fit: BoxFit.contain,
                     ),
                   ),
                   const SizedBox(height: 8),
-                  Text(
-                    copy.isIndonesian
-                        ? 'Opsional: tulis langkahmu atau lampirkan coretan. Ini hanya menjadi feedback diagnostik; skor tetap dari MCQ.'
-                        : 'Optional: type your steps or attach canvas work. This only adds diagnostic feedback; the score stays MCQ-only.',
-                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: WicaraColors.muted,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                  SizedBox(height: compact ? 18 : 27),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: _ChatBubble(text: question.prompt, isUser: false),
-                  ),
-                  const SizedBox(height: 16),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: _ChatBubble(
-                      text: '${selectedOption.label}. ${selectedOption.text}',
-                      isUser: true,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: _ChatBubble(
-                      text: copy.isIndonesian
-                          ? 'Mau tambah cara? Ketik di bawah atau pakai canvas.'
-                          : 'Want to add your method? Type it below or use canvas.',
-                      isUser: false,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Align(
-                    alignment: Alignment.centerLeft,
-                    child: _CanvasPromptBubble(
-                      copy: copy,
-                      hasCanvasWork: canvasSnapshots.isNotEmpty,
-                      onUseCanvas: onUseCanvas,
-                    ),
-                  ),
-                  if (canvasSnapshots.isNotEmpty) ...[
-                    const SizedBox(height: 16),
-                    Align(
-                      alignment: Alignment.centerRight,
-                      child: _CanvasAttachmentBubble(
-                        snapshot: canvasSnapshots.last,
-                        onOpenCanvas: onUseCanvas,
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.image_outlined,
+                        size: 18,
+                        color: WicaraColors.secondary,
                       ),
-                    ),
-                  ],
+                      const SizedBox(width: 7),
+                      Expanded(
+                        child: Text(
+                          imageName ?? 'work-image',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                      IconButton(
+                        tooltip: copy.isIndonesian
+                            ? 'Hapus foto'
+                            : 'Remove image',
+                        onPressed: isSubmitting ? null : onRemoveImage,
+                        icon: const Icon(Icons.close_rounded, size: 20),
+                      ),
+                    ],
+                  ),
                 ],
               ),
             ),
-          ),
-          _ReasoningFooter(
-            controller: controller,
-            horizontalPadding: horizontalPadding,
-            copy: copy,
-            isSubmitting: isSubmitting,
-            onSubmit: onSubmit,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ReasoningFooter extends StatelessWidget {
-  const _ReasoningFooter({
-    required this.controller,
-    required this.horizontalPadding,
-    required this.copy,
-    required this.isSubmitting,
-    required this.onSubmit,
-  });
-
-  final TextEditingController controller;
-  final double horizontalPadding;
-  final OnboardingCopy copy;
-  final bool isSubmitting;
-  final VoidCallback onSubmit;
-
-  @override
-  Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: WicaraColors.pageBackground.withValues(alpha: 0.96),
-        border: const Border(top: BorderSide(color: WicaraColors.line)),
-        boxShadow: [
-          BoxShadow(
-            color: WicaraColors.shadowBlue.withValues(alpha: 0.22),
-            blurRadius: 18,
-            offset: const Offset(0, -8),
+          const SizedBox(height: 13),
+          GradientButton(
+            label: copy.isIndonesian
+                ? 'Kirim jawaban dengan bukti'
+                : 'Submit answer with evidence',
+            onPressed: isSubmitting ? null : onSubmit,
+            isLoading: isSubmitting,
           ),
         ],
-      ),
-      child: Padding(
-        padding: EdgeInsets.fromLTRB(
-          horizontalPadding,
-          11,
-          horizontalPadding,
-          14,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            _ReasoningInput(
-              controller: controller,
-              isSubmitting: isSubmitting,
-              onSubmit: onSubmit,
-              locale: copy.isIndonesian ? 'id-ID' : 'en-US',
-            ),
-            const SizedBox(height: 11),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(
-                  Icons.verified_user_outlined,
-                  color: WicaraColors.softMuted,
-                  size: 18,
-                ),
-                const SizedBox(width: 8),
-                Flexible(
-                  child: Text(
-                    copy.isIndonesian
-                        ? 'Evidence opsional; jawaban MCQ tetap utama'
-                        : 'Optional evidence; MCQ answer stays primary',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: WicaraColors.muted,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
       ),
     );
   }
@@ -1654,356 +1654,6 @@ class _AssessmentFooter extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-class _ChatBubble extends StatelessWidget {
-  const _ChatBubble({required this.text, required this.isUser});
-
-  final String text;
-  final bool isUser;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      constraints: const BoxConstraints(maxWidth: 250),
-      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
-      decoration: BoxDecoration(
-        color: isUser ? WicaraColors.secondarySoft : Colors.white,
-        borderRadius: BorderRadius.circular(15),
-        border: Border.all(
-          color: isUser ? WicaraColors.secondaryLight : WicaraColors.line,
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: WicaraColors.shadowBlue.withValues(alpha: 0.18),
-            blurRadius: 15,
-            offset: const Offset(0, 9),
-          ),
-        ],
-      ),
-      child: RichMathText(
-        text,
-        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-          color: isUser ? WicaraColors.text : WicaraColors.muted,
-          fontWeight: FontWeight.w600,
-          height: 1.35,
-        ),
-      ),
-    );
-  }
-}
-
-class _CanvasPromptBubble extends StatelessWidget {
-  const _CanvasPromptBubble({
-    required this.copy,
-    required this.hasCanvasWork,
-    required this.onUseCanvas,
-  });
-
-  final OnboardingCopy copy;
-  final bool hasCanvasWork;
-  final VoidCallback onUseCanvas;
-
-  @override
-  Widget build(BuildContext context) {
-    final message = copy.isIndonesian
-        ? (hasCanvasWork
-              ? 'Coretan canvas sudah masuk. Tambah lagi kalau perlu.'
-              : 'Butuh papan coret? Buka canvas dan kirim coretanmu.')
-        : (hasCanvasWork
-              ? 'Canvas work is attached. Add another sketch if needed.'
-              : 'Need a whiteboard? Open canvas and send your sketch here.');
-    final buttonLabel = copy.isIndonesian
-        ? (hasCanvasWork ? 'Buka canvas' : 'Pakai canvas')
-        : (hasCanvasWork ? 'Open canvas' : 'Use canvas');
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Container(
-          constraints: const BoxConstraints(maxWidth: 260),
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 15),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(15),
-            border: Border.all(color: WicaraColors.line),
-            boxShadow: [
-              BoxShadow(
-                color: WicaraColors.shadowBlue.withValues(alpha: 0.16),
-                blurRadius: 15,
-                offset: const Offset(0, 9),
-              ),
-            ],
-          ),
-          child: Text(
-            message,
-            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-              color: WicaraColors.muted,
-              fontWeight: FontWeight.w600,
-              height: 1.35,
-            ),
-          ),
-        ),
-        const SizedBox(height: 10),
-        _CanvasQuickActionButton(label: buttonLabel, onPressed: onUseCanvas),
-      ],
-    );
-  }
-}
-
-class _CanvasQuickActionButton extends StatelessWidget {
-  const _CanvasQuickActionButton({
-    required this.label,
-    required this.onPressed,
-  });
-
-  final String label;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return Material(
-      color: Colors.transparent,
-      child: InkWell(
-        onTap: onPressed,
-        borderRadius: BorderRadius.circular(13),
-        child: Container(
-          height: 44,
-          padding: const EdgeInsets.symmetric(horizontal: 15),
-          decoration: BoxDecoration(
-            color: WicaraColors.secondary,
-            borderRadius: BorderRadius.circular(13),
-            boxShadow: [
-              BoxShadow(
-                color: WicaraColors.secondary.withValues(alpha: 0.22),
-                blurRadius: 14,
-                offset: const Offset(0, 8),
-              ),
-            ],
-          ),
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.draw_outlined, color: Colors.white, size: 19),
-              const SizedBox(width: 8),
-              Text(
-                label,
-                style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                  color: Colors.white,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _CanvasAttachmentBubble extends StatelessWidget {
-  const _CanvasAttachmentBubble({
-    required this.snapshot,
-    required this.onOpenCanvas,
-  });
-
-  final CanvasWorkSnapshot snapshot;
-  final VoidCallback onOpenCanvas;
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      constraints: const BoxConstraints(maxWidth: 270),
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: WicaraColors.speechBlue,
-        borderRadius: BorderRadius.circular(15),
-        border: Border.all(color: WicaraColors.primaryLight),
-        boxShadow: [
-          BoxShadow(
-            color: WicaraColors.shadowBlue.withValues(alpha: 0.18),
-            blurRadius: 15,
-            offset: const Offset(0, 9),
-          ),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Row(
-            children: [
-              const Icon(
-                Icons.image_outlined,
-                color: WicaraColors.primaryDeep,
-                size: 18,
-              ),
-              const SizedBox(width: 7),
-              Expanded(
-                child: Text(
-                  'Canvas work v${snapshot.version}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    color: WicaraColors.text,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          ClipRRect(
-            borderRadius: BorderRadius.circular(11),
-            child: AspectRatio(
-              aspectRatio: 4 / 3,
-              child: CanvasWorkPreview(snapshot: snapshot),
-            ),
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  '${snapshot.elementCount} marks${snapshot.hasAttachment ? ' • paper attached' : ''}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: WicaraColors.muted,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-              TextButton(
-                onPressed: onOpenCanvas,
-                style: TextButton.styleFrom(
-                  foregroundColor: WicaraColors.primaryDeep,
-                  minimumSize: const Size(0, 32),
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
-                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                ),
-                child: const Text('Edit'),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ReasoningInput extends StatelessWidget {
-  const _ReasoningInput({
-    required this.controller,
-    required this.isSubmitting,
-    required this.onSubmit,
-    required this.locale,
-  });
-
-  final TextEditingController controller;
-  final bool isSubmitting;
-  final VoidCallback onSubmit;
-  final String locale;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Row(
-          children: [
-            Expanded(
-              child: TextField(
-                controller: controller,
-                minLines: 1,
-                maxLines: 2,
-                decoration: InputDecoration(
-                  hintText: 'Type your method, or leave empty to submit...',
-                  filled: true,
-                  fillColor: WicaraColors.fieldFill,
-                  contentPadding: const EdgeInsets.symmetric(
-                    horizontal: 15,
-                    vertical: 16,
-                  ),
-                  enabledBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(13),
-                    borderSide: const BorderSide(
-                      color: WicaraColors.secondaryLight,
-                      width: 1.4,
-                    ),
-                  ),
-                  focusedBorder: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(13),
-                    borderSide: const BorderSide(
-                      color: WicaraColors.secondary,
-                      width: 1.7,
-                    ),
-                  ),
-                ),
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: WicaraColors.text,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Container(
-              width: 53,
-              height: 53,
-              decoration: BoxDecoration(
-                color: WicaraColors.secondary,
-                borderRadius: BorderRadius.circular(27),
-                boxShadow: [
-                  BoxShadow(
-                    color: WicaraColors.secondary.withValues(alpha: 0.24),
-                    blurRadius: 16,
-                    offset: const Offset(0, 9),
-                  ),
-                ],
-              ),
-              child: IconButton(
-                onPressed: isSubmitting ? null : onSubmit,
-                icon: isSubmitting
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2.2,
-                          valueColor: AlwaysStoppedAnimation<Color>(
-                            Colors.white,
-                          ),
-                        ),
-                      )
-                    : const Icon(Icons.arrow_upward_rounded),
-                color: Colors.white,
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: MicrophoneToggle(
-            locale: locale,
-            onTranscript: _insertTranscript,
-          ),
-        ),
-      ],
-    );
-  }
-
-  void _insertTranscript(String transcript) {
-    final selection = controller.selection;
-    final start = selection.isValid ? selection.start : controller.text.length;
-    final end = selection.isValid ? selection.end : controller.text.length;
-    final needsSpace = start > 0 && !controller.text[start - 1].endsWith(' ');
-    final insertion = '${needsSpace ? ' ' : ''}$transcript';
-    final updated = controller.text.replaceRange(start, end, insertion);
-    final caret = start + insertion.length;
-    controller.value = TextEditingValue(
-      text: updated,
-      selection: TextSelection.collapsed(offset: caret),
     );
   }
 }

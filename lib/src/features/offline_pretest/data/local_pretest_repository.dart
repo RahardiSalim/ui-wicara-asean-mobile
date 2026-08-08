@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import '../../offline_learning/data/local_curriculum_repository.dart';
 import '../../offline_learning/data/local_mastery_repository.dart';
 import '../../offline_learning/data/local_session_repository.dart';
@@ -63,6 +65,17 @@ class LocalPretestRepository implements PretestRepository {
   @override
   Future<PretestAnswerResult> submitAnswer(PretestAnswer answer) {
     return _engine.submitAnswer(answer);
+  }
+
+  @override
+  Future<String> uploadEvidenceImage({
+    required Uint8List bytes,
+    required String filename,
+    required String mimeType,
+  }) {
+    throw const PretestException(
+      'Image evidence upload requires the backend pretest mode.',
+    );
   }
 
   @override
