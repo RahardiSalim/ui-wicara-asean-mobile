@@ -12,6 +12,8 @@ class ApiClient {
     defaultValue: 'http://127.0.0.1:8000',
   );
 
+  static const defaultPostTimeout = Duration(minutes: 3);
+
   /// Production builds must provide WICARA_API_BASE_URL explicitly. Silently
   /// replacing a configured URL made local auth call a stale deployment.
   static String resolveRuntimeBaseUrl(String configuredBaseUrl) {
@@ -63,7 +65,7 @@ class ApiClient {
     Map<String, String>? queryParameters,
     Map<String, dynamic>? body,
     Map<String, String>? headers,
-    Duration timeout = const Duration(seconds: 45),
+    Duration timeout = defaultPostTimeout,
   }) async {
     final uri = Uri.parse(
       baseUrl,

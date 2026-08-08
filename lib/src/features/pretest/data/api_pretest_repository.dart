@@ -4,6 +4,8 @@ import '../domain/pretest_models.dart';
 import '../domain/pretest_repository.dart';
 import 'pretest_session_store.dart';
 
+const _pretestRequestTimeout = Duration(minutes: 5);
+
 class ApiPretestRepository implements PretestRepository {
   const ApiPretestRepository({
     required ApiClient apiClient,
@@ -32,6 +34,7 @@ class ApiPretestRepository implements PretestRepository {
         '/api/v1/pretests/start',
         headers: {'Authorization': 'Bearer $token'},
         body: {'learning_goal_id': learningGoalId},
+        timeout: _pretestRequestTimeout,
       );
       _pretestSessionStore.pretestSessionId = _string(json['session_id']);
       final current = json['current_question'];
@@ -68,6 +71,7 @@ class ApiPretestRepository implements PretestRepository {
           'canvas_asset_id': answer.canvasAssetId,
           'used_canvas': answer.usedCanvas,
         },
+        timeout: _pretestRequestTimeout,
       );
       final nextQuestion = json['next_question'];
       if (nextQuestion is Map<String, dynamic>) {
