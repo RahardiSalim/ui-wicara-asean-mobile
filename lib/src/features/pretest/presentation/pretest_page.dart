@@ -232,6 +232,12 @@ class _PretestPageState extends State<PretestPage> {
     );
   }
 
+  void _leavePretest() {
+    Navigator.of(
+      context,
+    ).pushNamedAndRemoveUntil(AppRoutes.home, (route) => false);
+  }
+
   void _openLargeCanvas() {
     showDialog<void>(
       context: context,
@@ -354,7 +360,7 @@ class _PretestPageState extends State<PretestPage> {
             .toDouble(),
         selectedOptionId: _selectedOptionId,
         isSubmitting: _isSubmitting,
-        onClose: _goHome,
+        onClose: _leavePretest,
         onSelected: (id) => setState(() => _selectedOptionId = id),
         submitLabel: copy.isIndonesian ? 'Kirim jawaban' : 'Submit answer',
         addEvidenceLabel: copy.isIndonesian

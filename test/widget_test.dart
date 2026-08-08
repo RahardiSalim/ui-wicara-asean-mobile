@@ -88,6 +88,38 @@ void main() {
     expect(reachedHome || reachedOnboarding, isTrue);
   });
 
+  testWidgets('home offers to continue an unfinished pretest', (tester) async {
+    tester.view.physicalSize = const Size(430, 932);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    await tester.pumpWidget(
+      await _buildSignedInTestApp(
+        learningGoalRepository: const _FakeLearningGoalRepository(
+          activeGoal: ActiveLearningGoal(
+            id: 'goal-in-progress',
+            status: 'pretest_in_progress',
+            rawTopic: 'Curve sketching using derivatives',
+            nextAction: 'continue_pretest',
+            pretestSessionId: 'pretest-in-progress',
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Pretest in progress'), findsOneWidget);
+    expect(find.text('Continue pretest'), findsOneWidget);
+    expect(find.text('Curve sketching using derivatives'), findsOneWidget);
+
+    await tester.ensureVisible(find.text('Continue pretest'));
+    await tester.tap(find.text('Continue pretest'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Submit answer'), findsOneWidget);
+  });
+
   testWidgets('daily evaluation renders backend result payload', (
     tester,
   ) async {
@@ -462,6 +494,7 @@ Future<WicaraApp> _buildTestApp() async {
 
 Future<Widget> _buildSignedInTestApp({
   HomeRepository homeRepository = _homeRepository,
+  LearningGoalRepository learningGoalRepository = _learningGoalRepository,
   WorkspaceRepository? workspaceRepository,
   String educationLevel = 'senior_high',
   String gradeLevel = '11',
@@ -489,7 +522,7 @@ Future<Widget> _buildSignedInTestApp({
     authController: authController,
     onboardingController: onboardingController,
     curriculumRepository: _curriculumRepository,
-    learningGoalRepository: _learningGoalRepository,
+    learningGoalRepository: learningGoalRepository,
     homeRepository: homeRepository,
     onboardingRepository: const MockOnboardingRepository(delay: Duration.zero),
     pretestRepository: const MockPretestRepository(delay: Duration.zero),
@@ -545,10 +578,12 @@ class _FailingCurriculumRepository implements CurriculumRepository {
 }
 
 class _FakeLearningGoalRepository implements LearningGoalRepository {
-  const _FakeLearningGoalRepository();
+  const _FakeLearningGoalRepository({this.activeGoal});
+
+  final ActiveLearningGoal? activeGoal;
 
   @override
-  Future<ActiveLearningGoal?> fetchActiveGoal() async => null;
+  Future<ActiveLearningGoal?> fetchActiveGoal() async => activeGoal;
 
   @override
   Future<LearningGoalResolution> resolveLearningGoal({

@@ -149,6 +149,7 @@ class _AppHomePageState extends State<AppHomePage> {
   bool _edgeAiSetupPromptShown = false;
   bool _edgeAiSetupCheckInFlight = false;
   bool _isTeacher = false;
+  Future<ActiveLearningGoal?>? _activeGoalFuture;
 
   Future<void> _checkTeacherRole() async {
     final repo = widget.reviewRepository;
@@ -239,6 +240,7 @@ class _AppHomePageState extends State<AppHomePage> {
   void initState() {
     super.initState();
     _homeSnapshotFuture = widget.homeRepository.fetchSnapshot();
+    _activeGoalFuture = _fetchActiveGoal();
     unawaited(_checkTeacherRole());
     final shouldOpenGoalHistory = _shouldOpenGoalHistory(widget.routeArguments);
     _autoOpenWorkspacePending =
@@ -451,7 +453,20 @@ class _AppHomePageState extends State<AppHomePage> {
   void _retryHomeSnapshot() {
     setState(() {
       _homeSnapshotFuture = widget.homeRepository.fetchSnapshot();
+      _activeGoalFuture = _fetchActiveGoal();
     });
+  }
+
+  Future<ActiveLearningGoal?> _fetchActiveGoal() async {
+    try {
+      return await widget.learningGoalRepository.fetchActiveGoal();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void _resumePretest() {
+    Navigator.of(context).pushNamed(AppRoutes.pretest);
   }
 
   Future<void> _syncOnboardingProfileFromSnapshot(HomeSnapshot snapshot) async {
@@ -1112,12 +1127,14 @@ class _AppHomePageState extends State<AppHomePage> {
       _HomeTab.home => _HomeDashboard(
         constraints: constraints,
         snapshotFuture: _homeSnapshotFuture,
+        activeGoalFuture: _activeGoalFuture ??= _fetchActiveGoal(),
         onRetrySnapshot: _retryHomeSnapshot,
         onOpenQueue: () => _openQueue(),
         onOpenTracks: () => _openQueue(_QueueTab.tracks),
         onTakeDailyEvaluation: () {
           _openDailyEvaluation();
         },
+        onResumePretest: _resumePretest,
         onContinueSession: (arguments) async {
           try {
             final snapshot = await _homeSnapshotFuture;
@@ -1324,19 +1341,23 @@ class _HomeDashboard extends StatelessWidget {
   const _HomeDashboard({
     required this.constraints,
     required this.snapshotFuture,
+    required this.activeGoalFuture,
     required this.onRetrySnapshot,
     required this.onOpenQueue,
     required this.onOpenTracks,
     required this.onTakeDailyEvaluation,
+    required this.onResumePretest,
     required this.onContinueSession,
   });
 
   final BoxConstraints constraints;
   final Future<HomeSnapshot> snapshotFuture;
+  final Future<ActiveLearningGoal?> activeGoalFuture;
   final VoidCallback onRetrySnapshot;
   final VoidCallback onOpenQueue;
   final VoidCallback onOpenTracks;
   final VoidCallback onTakeDailyEvaluation;
+  final VoidCallback onResumePretest;
   final ValueChanged<WorkspaceRouteArguments> onContinueSession;
 
   @override
@@ -1348,9 +1369,11 @@ class _HomeDashboard extends StatelessWidget {
       builder: (snapshot) => _HomeDashboardContent(
         constraints: constraints,
         snapshot: snapshot,
+        activeGoalFuture: activeGoalFuture,
         onOpenQueue: onOpenQueue,
         onOpenTracks: onOpenTracks,
         onTakeDailyEvaluation: onTakeDailyEvaluation,
+        onResumePretest: onResumePretest,
         onContinueSession: onContinueSession,
       ),
     );
@@ -1361,17 +1384,21 @@ class _HomeDashboardContent extends StatelessWidget {
   const _HomeDashboardContent({
     required this.constraints,
     required this.snapshot,
+    required this.activeGoalFuture,
     required this.onOpenQueue,
     required this.onOpenTracks,
     required this.onTakeDailyEvaluation,
+    required this.onResumePretest,
     required this.onContinueSession,
   });
 
   final BoxConstraints constraints;
   final HomeSnapshot snapshot;
+  final Future<ActiveLearningGoal?> activeGoalFuture;
   final VoidCallback onOpenQueue;
   final VoidCallback onOpenTracks;
   final VoidCallback onTakeDailyEvaluation;
+  final VoidCallback onResumePretest;
   final ValueChanged<WorkspaceRouteArguments> onContinueSession;
 
   @override
@@ -1401,6 +1428,22 @@ class _HomeDashboardContent extends StatelessWidget {
                 fontWeight: FontWeight.w600,
               ),
             ),
+            FutureBuilder<ActiveLearningGoal?>(
+              future: activeGoalFuture,
+              builder: (context, activeGoalSnapshot) {
+                final goal = activeGoalSnapshot.data;
+                if (!_hasResumablePretest(goal)) {
+                  return const SizedBox.shrink();
+                }
+                return Padding(
+                  padding: const EdgeInsets.only(top: 22),
+                  child: _ActivePretestCard(
+                    goal: goal!,
+                    onContinue: onResumePretest,
+                  ),
+                );
+              },
+            ),
             const SizedBox(height: 35),
             _ExploreTracksCard(onOpenTracks: onOpenTracks),
             const SizedBox(height: 20),
@@ -1415,6 +1458,100 @@ class _HomeDashboardContent extends StatelessWidget {
             _DailyEvaluationCard(onTakeEvaluation: onTakeDailyEvaluation),
           ],
         ),
+      ),
+    );
+  }
+}
+
+bool _hasResumablePretest(ActiveLearningGoal? goal) {
+  if (goal == null) {
+    return false;
+  }
+  return goal.nextAction.trim().toLowerCase() == 'continue_pretest' ||
+      (goal.pretestSessionId?.trim().isNotEmpty ?? false);
+}
+
+class _ActivePretestCard extends StatelessWidget {
+  const _ActivePretestCard({required this.goal, required this.onContinue});
+
+  final ActiveLearningGoal goal;
+  final VoidCallback onContinue;
+
+  @override
+  Widget build(BuildContext context) {
+    final copy = _HomeCopyScope.of(context);
+    final conceptTitle = goal.targetConcept?.title.trim() ?? '';
+    final title = conceptTitle.isNotEmpty ? conceptTitle : goal.rawTopic;
+
+    return _Panel(
+      padding: const EdgeInsets.fromLTRB(17, 16, 17, 17),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: WicaraColors.speechBlue,
+                  borderRadius: BorderRadius.circular(13),
+                ),
+                child: const Icon(
+                  Icons.pending_actions_rounded,
+                  color: WicaraColors.secondary,
+                  size: 23,
+                ),
+              ),
+              const SizedBox(width: 13),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      copy.isIndonesian
+                          ? 'Pretest belum selesai'
+                          : 'Pretest in progress',
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        color: WicaraColors.text,
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 5),
+                    Text(
+                      title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: WicaraColors.muted,
+                        fontWeight: FontWeight.w600,
+                        height: 1.3,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Text(
+            copy.isIndonesian
+                ? 'Jawaban yang sudah dikirim tetap tersimpan. Lanjutkan dari soal terakhir.'
+                : 'Your submitted answers are saved. Continue from your latest question.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: WicaraColors.text,
+              fontWeight: FontWeight.w600,
+              height: 1.35,
+            ),
+          ),
+          const SizedBox(height: 14),
+          GradientButton(
+            label: copy.isIndonesian ? 'Lanjutkan pretest' : 'Continue pretest',
+            onPressed: onContinue,
+          ),
+        ],
       ),
     );
   }
