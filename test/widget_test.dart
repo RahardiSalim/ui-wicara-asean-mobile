@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -1070,7 +1071,6 @@ class _FakeWorkspaceRepository implements WorkspaceRepository {
   }) {
     return const WorkspaceSessionHistory(
       activeWorkspaceId: 'workspace-perkalian',
-      workspaceIds: ['workspace-perkalian'],
     );
   }
 
@@ -1082,9 +1082,40 @@ class _FakeWorkspaceRepository implements WorkspaceRepository {
   }) async {}
 
   @override
+  Future<void> deleteSession({
+    required String trackId,
+    required String moduleId,
+    required String workspaceId,
+  }) async {}
+
+  @override
+  Future<String> uploadCanvasImage({
+    required Uint8List bytes,
+    String filename = 'canvas.png',
+  }) async => 'image-asset-1';
+
+  @override
+  String imageAssetUrl(String imageAssetId) =>
+      'https://example.test/image/$imageAssetId';
+
+  @override
+  Map<String, String> imageAssetHeaders() => const {};
+
+  @override
+  Future<void> clearCachedSession({
+    required String trackId,
+    required String moduleId,
+  }) async {}
+
+  @override
+  Future<void> clearLocalSessions() async {}
+
+  @override
   Future<List<WorkspaceSessionSummary>> fetchSessionHistory({
     required String trackId,
     required String moduleId,
+    int limit = 20,
+    int offset = 0,
   }) async {
     return const [
       WorkspaceSessionSummary(
@@ -1122,6 +1153,7 @@ class _FakeWorkspaceRepository implements WorkspaceRepository {
     required String eventType,
     String textPayload = '',
     Map<String, dynamic> metadata = const {},
+    String? imageAssetId,
   }) async {
     final event = WorkspaceEvent(
       id: 'event-$eventType',

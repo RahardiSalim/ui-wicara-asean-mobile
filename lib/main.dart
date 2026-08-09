@@ -73,6 +73,9 @@ Future<void> main() async {
     ),
     sessionStore: sessionStore,
     apiClient: apiClient,
+    // Workspace ids are account-scoped; keeping them across a sign-out makes the
+    // next account POST ids it does not own and 404 out of every module.
+    onSignedOut: [workspaceStore.clearAll],
   );
 
   await authController.initialize();

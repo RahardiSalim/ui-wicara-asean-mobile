@@ -222,6 +222,27 @@ class ApiClient {
     return decoded;
   }
 
+  /// Sends a DELETE. Returns normally on any 2xx, including a 204 with no body.
+  Future<void> delete(
+    String path, {
+    Map<String, String>? queryParameters,
+    Map<String, String>? headers,
+  }) async {
+    final uri = Uri.parse(
+      baseUrl,
+    ).replace(path: path, queryParameters: queryParameters);
+    final mergedHeaders = <String, String>{..._buildHeaders(), ...?headers};
+    final response = await _httpClient
+        .delete(uri, headers: mergedHeaders)
+        .timeout(const Duration(seconds: 8));
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw ApiClientException(
+        _errorMessage(response, method: 'DELETE', uri: uri),
+      );
+    }
+  }
+
   Map<String, String> _buildHeaders({bool includeJsonContentType = false}) {
     return <String, String>{
       'Accept': 'application/json',

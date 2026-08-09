@@ -47,8 +47,10 @@ class WorkspaceSession {
     this.learningContext = const WorkspaceLearningContext(),
     this.phaseEvidence = const <String, List<Map<String, dynamic>>>{},
     this.hintLevel = 0,
+    this.tutorDegraded = false,
     this.posttestTrigger,
     this.latestMedia,
+    this.lastImageAssetId,
   });
 
   final String id;
@@ -66,8 +68,10 @@ class WorkspaceSession {
   final WorkspaceLearningContext learningContext;
   final Map<String, List<Map<String, dynamic>>> phaseEvidence;
   final int hintLevel;
+  final bool tutorDegraded;
   final WorkspacePosttestTrigger? posttestTrigger;
   final WorkspaceMediaArtifact? latestMedia;
+  final String? lastImageAssetId;
 }
 
 class WorkspaceLearningContext {
@@ -131,6 +135,15 @@ class WorkspacePosttestTrigger {
   bool get isReady => status.toLowerCase() == 'ready';
 }
 
+/// Locally cached pointer to the workspace the learner was last in, for a
+/// given track+module. The server remains authoritative for which sessions
+/// exist; this only says where to resume.
+class WorkspaceSessionHistory {
+  const WorkspaceSessionHistory({required this.activeWorkspaceId});
+
+  final String? activeWorkspaceId;
+}
+
 class WorkspaceSessionSummary {
   const WorkspaceSessionSummary({
     required this.id,
@@ -162,6 +175,10 @@ class WorkspaceEvent {
     required this.actorType,
     required this.textPayload,
     required this.metadata,
+    this.imageAssetId,
+    this.mediaArtifactId,
+    this.inputEventId,
+    this.createdAt,
   });
 
   final String id;
@@ -171,8 +188,17 @@ class WorkspaceEvent {
   final String actorType;
   final String textPayload;
   final Map<String, dynamic> metadata;
+  final String? imageAssetId;
+  final String? mediaArtifactId;
+  final String? inputEventId;
+  final DateTime? createdAt;
 
   bool get isLearner => actorType == 'learner';
+
+  bool get hasImage => (imageAssetId ?? '').isNotEmpty;
+
+  /// True when the tutor turn came from the deterministic offline fallback.
+  bool get isDegradedTutorTurn => metadata['degraded'] == true;
 
   List<String> get tutorNextActions {
     final value = metadata['next_actions'];
@@ -212,6 +238,7 @@ class WorkspaceTutorResponse {
     this.scaffoldLevel = 0,
     this.evidenceRequest,
     this.explanationCard,
+    this.degraded = false,
   });
 
   final String text;
@@ -227,6 +254,11 @@ class WorkspaceTutorResponse {
   final int scaffoldLevel;
   final Map<String, dynamic>? evidenceRequest;
   final Map<String, dynamic>? explanationCard;
+  final bool degraded;
+
+  bool get isJudged => correctness != 'unknown';
+  bool get hasMisconception =>
+      misconceptionStatus == 'suspected' || misconceptionStatus == 'active';
 }
 
 class WorkspaceMasteryUpdate {

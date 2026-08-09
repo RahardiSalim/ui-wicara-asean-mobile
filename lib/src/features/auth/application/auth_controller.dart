@@ -10,13 +10,19 @@ class AuthController extends ChangeNotifier {
     required AuthRepository authRepository,
     required AuthSessionStore sessionStore,
     required ApiClient apiClient,
+    List<Future<void> Function()> onSignedOut = const [],
   }) : _authRepository = authRepository,
        _sessionStore = sessionStore,
-       _apiClient = apiClient;
+       _apiClient = apiClient,
+       _onSignedOut = onSignedOut;
 
   final AuthRepository _authRepository;
   final AuthSessionStore _sessionStore;
   final ApiClient _apiClient;
+
+  /// Per-feature cleanup run on sign-out. Anything caching account-scoped ids
+  /// must register here, otherwise the next account inherits them.
+  final List<Future<void> Function()> _onSignedOut;
 
   bool _isInitialized = false;
   AuthSession? _session;
@@ -181,6 +187,13 @@ class AuthController extends ChangeNotifier {
       _lastProtectedRoute = null;
       _apiClient.clearAuthToken();
       await _sessionStore.clear();
+      for (final clear in _onSignedOut) {
+        try {
+          await clear();
+        } catch (_) {
+          // Best effort: one failing cleanup must not block sign-out.
+        }
+      }
       notifyListeners();
     }
   }

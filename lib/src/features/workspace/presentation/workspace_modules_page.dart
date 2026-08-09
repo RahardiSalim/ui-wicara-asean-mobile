@@ -70,6 +70,9 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
   List<WorkspaceSessionSummary> _sessionHistory = const [];
   String? _activeSessionId;
   int _workspaceRequestSerial = 0;
+  WorkspaceTutorResponse? _lastTutorResponse;
+  WorkspaceMasteryUpdate? _lastMasteryUpdate;
+  String? _activeVideoJobId;
 
   /// Latest weekly report fetched from HomeRepository. Null while loading or
   /// if no HomeRepository was provided.
@@ -136,13 +139,30 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
       final resolvedWorkspaceSessionId =
           workspaceSessionId ??
           (startNewSession ? null : storedHistory.activeWorkspaceId);
-      final workspace = await widget.workspaceRepository
-          .createOrResumeWorkspace(
-            trackId: arguments.trackId,
-            moduleId: arguments.moduleId,
-            workspaceSessionId: resolvedWorkspaceSessionId,
-            startNewSession: startNewSession,
-          );
+      WorkspaceSession workspace;
+      try {
+        workspace = await widget.workspaceRepository.createOrResumeWorkspace(
+          trackId: arguments.trackId,
+          moduleId: arguments.moduleId,
+          workspaceSessionId: resolvedWorkspaceSessionId,
+          startNewSession: startNewSession,
+        );
+      } on WorkspaceException {
+        // A cached id can outlive the session it points at (or belong to a
+        // previous account). Fall back to a fresh resume instead of dead-ending
+        // the learner on an error they cannot clear from inside the app.
+        if (resolvedWorkspaceSessionId == null) {
+          rethrow;
+        }
+        await widget.workspaceRepository.clearCachedSession(
+          trackId: arguments.trackId,
+          moduleId: arguments.moduleId,
+        );
+        workspace = await widget.workspaceRepository.createOrResumeWorkspace(
+          trackId: arguments.trackId,
+          moduleId: arguments.moduleId,
+        );
+      }
       await widget.workspaceRepository.updateModuleState(
         trackId: arguments.trackId,
         moduleId: arguments.moduleId,
@@ -253,6 +273,9 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     _latestVideoArtifact = null;
     _videoStatusMessage = null;
     _videoErrorMessage = null;
+    _lastTutorResponse = null;
+    _lastMasteryUpdate = null;
+    _activeVideoJobId = null;
   }
 
   Future<void> _openSessionHistorySheet() async {
@@ -287,12 +310,46 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
           sessions: sessions,
           activeSessionId: _activeSessionId,
           material: _workspaceMaterial,
+          onDeleteSession: (id) => unawaited(_deleteSession(id)),
         );
       },
     );
     if (selected != null) {
       await _switchToSession(selected);
     }
+  }
+
+  Future<void> _deleteSession(String workspaceId) async {
+    final arguments = widget.routeArguments;
+    if (arguments == null || !arguments.isValid) {
+      return;
+    }
+    try {
+      await widget.workspaceRepository.deleteSession(
+        trackId: arguments.trackId,
+        moduleId: arguments.moduleId,
+        workspaceId: workspaceId,
+      );
+    } on WorkspaceException catch (error) {
+      if (mounted) {
+        setState(() => _workspaceError = error.message);
+      }
+      return;
+    }
+    if (!mounted) {
+      return;
+    }
+    // Deleting the session you are sitting in has to re-resolve which session
+    // to show; deleting any other one only prunes the list.
+    if (workspaceId == _workspace?.id) {
+      await _loadWorkspace();
+      return;
+    }
+    setState(() {
+      _sessionHistory = _sessionHistory
+          .where((session) => session.id != workspaceId)
+          .toList(growable: false);
+    });
   }
 
   Future<void> _generateVideo() async {
@@ -352,6 +409,7 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
         _videoStatusMessage = _workspaceMaterial.videoQueuedMessage;
       });
 
+      _activeVideoJobId = result.queue.jobId;
       await _pollVideoStatus(jobId: result.queue.jobId);
     } on WorkspaceException catch (error) {
       if (!mounted) return;
@@ -375,6 +433,9 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
         setState(() {
           _isVideoGenerating = false;
           _contentMode = _WorkspaceContentMode.videoFailed;
+          // Keep the job id: the render usually lands after this, and the
+          // learner can re-attach instead of paying to generate it again.
+          _activeVideoJobId = jobId;
           _videoErrorMessage = _workspaceMaterial.videoTimedOutMessage(
             _videoPollingTimeout.inMinutes,
           );
@@ -412,6 +473,7 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
         _scrollToBottomIfNearBottom();
 
         if (status.isFinal) {
+          _activeVideoJobId = null;
           if (status.isReady) {
             await _refreshWorkspaceAfterReady();
           }
@@ -431,6 +493,37 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
 
       await Future<void>.delayed(_videoPollingInterval);
     }
+  }
+
+  /// Re-attaches to a render that was still running when polling stopped
+  /// (backgrounded app, session switch, or the 5-minute timeout).
+  Future<void> _resumeVideoPolling() async {
+    final jobId = _activeVideoJobId;
+    if (jobId == null || _isVideoGenerating) {
+      return;
+    }
+    setState(() {
+      _isVideoGenerating = true;
+      _contentMode = _WorkspaceContentMode.videoProcessing;
+      _videoErrorMessage = null;
+      _videoStatusMessage = _workspaceMaterial.resumingVideoMessage;
+    });
+    await _pollVideoStatus(jobId: jobId);
+  }
+
+  /// Records that the learner actually watched the render. Without this the
+  /// backend has no signal distinguishing a played video from an ignored one.
+  Future<void> _markVideoViewed(WorkspaceMediaArtifact artifact) async {
+    if (_isAppendingEvent || _workspace == null) {
+      return;
+    }
+    await _appendWorkspaceEvent(
+      eventType: 'media_viewed',
+      metadata: {
+        'media_artifact_id': artifact.id,
+        'triggered_by': 'workspace_video_playback',
+      },
+    );
   }
 
   Future<void> _refreshWorkspaceAfterReady() async {
@@ -684,8 +777,31 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
       _canvasSnapshots.add(snapshot);
       _chatEntries.add(_WorkspaceChatEntry.canvas(snapshot));
     });
+    _scrollToBottom();
+
+    // Upload the drawing itself, not just a description of it: without the
+    // image the tutor is answering blind about work it cannot see.
+    String? imageAssetId;
+    try {
+      final png = await renderCanvasSnapshotPng(snapshot);
+      if (png != null) {
+        imageAssetId = await widget.workspaceRepository.uploadCanvasImage(
+          bytes: png,
+        );
+      }
+    } on WorkspaceException catch (error) {
+      if (mounted) {
+        setState(() {
+          _workspaceError = _workspaceMaterial.canvasUploadFailedMessage(
+            error.message,
+          );
+        });
+      }
+    }
+
     await _appendWorkspaceEvent(
       eventType: 'canvas_sent',
+      imageAssetId: imageAssetId,
       metadata: {
         'version': snapshot.version,
         'element_count': snapshot.elementCount,
@@ -693,6 +809,7 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
         'show_grid': snapshot.showGrid,
         'canvas_width': snapshot.canvasSize.width,
         'canvas_height': snapshot.canvasSize.height,
+        'image_uploaded': imageAssetId != null,
       },
     );
     _scrollToBottom();
@@ -701,6 +818,7 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
   Future<void> _sendMessage() async {
     final message = _messageController.text.trim();
     if (message.isEmpty) return;
+    if (_isAppendingEvent) return;
     if (_isLoadingWorkspace || _workspace == null) {
       setState(() {
         _workspaceError = _workspaceMaterial.chatLoadingMessage;
@@ -749,6 +867,7 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     required String eventType,
     String textPayload = '',
     Map<String, dynamic> metadata = const {},
+    String? imageAssetId,
   }) async {
     final workspace = _workspace;
     if (workspace == null) {
@@ -767,6 +886,7 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
         eventType: eventType,
         textPayload: textPayload,
         metadata: metadata,
+        imageAssetId: imageAssetId,
       );
       if (!mounted || _workspace?.id != workspace.id) return;
       final arguments = widget.routeArguments;
@@ -789,6 +909,8 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
           ..clear()
           ..addAll(_entriesFromEvents(result.workspace.events));
         _isAppendingEvent = false;
+        _lastTutorResponse = result.tutorResponse;
+        _lastMasteryUpdate = result.masteryUpdate;
       });
     } on WorkspaceException catch (error) {
       if (!mounted || _workspace?.id != workspace.id) return;
@@ -806,17 +928,36 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
   }
 
   List<_WorkspaceChatEntry> _entriesFromEvents(List<WorkspaceEvent> events) {
+    final material = _workspaceMaterial;
     return events
         .map((event) {
+          final imageUrl = event.hasImage
+              ? widget.workspaceRepository.imageAssetUrl(event.imageAssetId!)
+              : null;
           if (event.eventType == 'canvas_sent') {
             final count = event.metadata['element_count'];
             return _WorkspaceChatEntry.text(
-              text: _workspaceMaterial.canvasSnapshotSentLabel(count),
+              text: material.canvasSnapshotSentLabel(count),
               isUser: true,
+              imageUrl: imageUrl,
+              timestamp: event.createdAt,
+            );
+          }
+          if (event.eventType == 'media_generated') {
+            return _WorkspaceChatEntry.systemNote(
+              material.videoRequestedNote,
+              timestamp: event.createdAt,
             );
           }
           if (event.textPayload.trim().isEmpty) {
-            return null;
+            return imageUrl == null
+                ? null
+                : _WorkspaceChatEntry.text(
+                    text: material.imageSentLabel,
+                    isUser: event.isLearner,
+                    imageUrl: imageUrl,
+                    timestamp: event.createdAt,
+                  );
           }
           return _WorkspaceChatEntry.text(
             text: event.textPayload,
@@ -824,6 +965,9 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
             nextActions: event.tutorNextActions,
             evidenceRequest: event.tutorEvidenceRequest,
             explanationCard: event.tutorExplanationCard,
+            imageUrl: imageUrl,
+            isDegraded: !event.isLearner && event.isDegradedTutorTurn,
+            timestamp: event.createdAt,
           );
         })
         .whereType<_WorkspaceChatEntry>()
@@ -1135,6 +1279,24 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
                                 videoErrorMessage: _videoErrorMessage,
                                 canGenerateVideo:
                                     _canGenerateVideoForCurrentTopic(),
+                                tutorDegraded:
+                                    _workspace?.tutorDegraded ?? false,
+                                hintLevel: _workspace?.hintLevel ?? 0,
+                                learningContext: _workspace?.learningContext,
+                                imageHeaders: widget.workspaceRepository
+                                    .imageAssetHeaders(),
+                                lastTutorResponse: _lastTutorResponse,
+                                lastMasteryUpdate: _lastMasteryUpdate,
+                                canResumeVideo: _activeVideoJobId != null,
+                                onResumeVideo: () {
+                                  unawaited(_resumeVideoPolling());
+                                },
+                                onVideoViewed: () {
+                                  final artifact = _latestVideoArtifact;
+                                  if (artifact != null) {
+                                    unawaited(_markVideoViewed(artifact));
+                                  }
+                                },
                                 weeklyReport: _reportCardDismissed
                                     ? null
                                     : _weeklyReport,
@@ -1164,6 +1326,7 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
                         unawaited(_generateVideo());
                       },
                       canAdvancePhase: canAdvancePhase,
+                      isSending: _isAppendingEvent,
                       isPhaseSubmitting: _isPhaseSubmitting,
                       isVideoGenerating: _isVideoGenerating,
                       canGenerateVideo: _canGenerateVideoForCurrentTopic(),
@@ -1188,14 +1351,33 @@ class _WorkspaceChatEntry {
     this.nextActions = const [],
     this.evidenceRequest,
     this.explanationCard,
-  }) : snapshot = null;
+    this.imageUrl,
+    this.isDegraded = false,
+    this.timestamp,
+  }) : snapshot = null,
+       isSystemNote = false;
 
-  const _WorkspaceChatEntry.canvas(this.snapshot)
+  const _WorkspaceChatEntry.canvas(this.snapshot, {this.imageUrl})
     : text = null,
       isUser = true,
       nextActions = const [],
       evidenceRequest = null,
-      explanationCard = null;
+      explanationCard = null,
+      isDegraded = false,
+      isSystemNote = false,
+      timestamp = null;
+
+  /// A non-conversational marker in the transcript, e.g. "a video was requested
+  /// here". Rendered centred and muted rather than as a chat bubble.
+  const _WorkspaceChatEntry.systemNote(this.text, {this.timestamp})
+    : isUser = false,
+      snapshot = null,
+      nextActions = const [],
+      evidenceRequest = null,
+      explanationCard = null,
+      imageUrl = null,
+      isDegraded = false,
+      isSystemNote = true;
 
   final String? text;
   final bool isUser;
@@ -1203,6 +1385,10 @@ class _WorkspaceChatEntry {
   final List<String> nextActions;
   final Map<String, dynamic>? evidenceRequest;
   final Map<String, dynamic>? explanationCard;
+  final String? imageUrl;
+  final bool isDegraded;
+  final bool isSystemNote;
+  final DateTime? timestamp;
 
   bool get isCanvas => snapshot != null;
   bool get hasStructuredTutorData =>
@@ -1216,11 +1402,13 @@ class _WorkspaceHistorySheet extends StatelessWidget {
     required this.sessions,
     required this.activeSessionId,
     required this.material,
+    required this.onDeleteSession,
   });
 
   final List<WorkspaceSessionSummary> sessions;
   final String? activeSessionId;
   final _LocalizedWorkspaceMaterial material;
+  final ValueChanged<String> onDeleteSession;
 
   @override
   Widget build(BuildContext context) {
@@ -1269,9 +1457,47 @@ class _WorkspaceHistorySheet extends StatelessWidget {
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    trailing: isActive
-                        ? const Icon(Icons.check_rounded)
-                        : const Icon(Icons.chevron_right_rounded),
+                    trailing: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline_rounded),
+                          tooltip: material.deleteSessionLabel,
+                          onPressed: () async {
+                            final confirmed = await showDialog<bool>(
+                              context: context,
+                              builder: (dialogContext) => AlertDialog(
+                                title: Text(material.deleteSessionLabel),
+                                content: Text(
+                                  material.deleteSessionConfirmBody,
+                                ),
+                                actions: [
+                                  TextButton(
+                                    onPressed: () =>
+                                        Navigator.of(dialogContext).pop(false),
+                                    child: Text(material.cancelLabel),
+                                  ),
+                                  FilledButton(
+                                    onPressed: () =>
+                                        Navigator.of(dialogContext).pop(true),
+                                    child: Text(material.deleteSessionLabel),
+                                  ),
+                                ],
+                              ),
+                            );
+                            if (confirmed == true && context.mounted) {
+                              Navigator.of(context).pop();
+                              onDeleteSession(session.id);
+                            }
+                          },
+                        ),
+                        Icon(
+                          isActive
+                              ? Icons.check_rounded
+                              : Icons.chevron_right_rounded,
+                        ),
+                      ],
+                    ),
                     onTap: () => Navigator.of(context).pop(session.id),
                   );
                 },
@@ -1482,6 +1708,61 @@ class _LocalizedWorkspaceMaterial {
       ? 'Sinkronisasi workspace gagal: $message'
       : 'Workspace sync failed: $message';
 
+  String get imageSentLabel => isIndonesian ? 'Gambar terkirim' : 'Image sent';
+
+  String get videoRequestedNote =>
+      isIndonesian ? 'Video diminta di sini.' : 'A video was requested here.';
+
+  String canvasUploadFailedMessage(String message) => isIndonesian
+      ? 'Gambar kanvas gagal diunggah, tutor hanya menerima teks: $message'
+      : 'Canvas image upload failed, the tutor only received text: $message';
+
+  String get resumingVideoMessage => isIndonesian
+      ? 'Menyambung kembali ke proses render...'
+      : 'Re-attaching to the render in progress...';
+
+  String get resumeVideoLabel =>
+      isIndonesian ? 'Sambungkan lagi' : 'Re-attach';
+
+  String get tutorOfflineTitle =>
+      isIndonesian ? 'Tutor AI sedang tidak tersedia' : 'AI tutor unavailable';
+
+  String get tutorOfflineBody => isIndonesian
+      ? 'Balasan berikut memakai teks cadangan, jadi fase belajar tidak akan maju sampai tutor kembali. Coba lagi sebentar lagi.'
+      : 'The replies below use fallback text, so your phase will not advance until the tutor is back. Try again shortly.';
+
+  String get feedbackCorrectLabel => isIndonesian ? 'Tepat' : 'Correct';
+  String get feedbackPartialLabel =>
+      isIndonesian ? 'Hampir tepat' : 'Partly there';
+  String get feedbackIncorrectLabel =>
+      isIndonesian ? 'Belum tepat' : 'Not yet';
+  String get misconceptionLabel =>
+      isIndonesian ? 'Ada miskonsepsi' : 'Misconception detected';
+
+  String masteryDeltaLabel(double delta) {
+    final rounded = (delta * 100).abs().toStringAsFixed(0);
+    if (delta > 0) {
+      return isIndonesian ? 'Penguasaan +$rounded%' : 'Mastery +$rounded%';
+    }
+    if (delta < 0) {
+      return isIndonesian ? 'Penguasaan -$rounded%' : 'Mastery -$rounded%';
+    }
+    return isIndonesian ? 'Penguasaan tetap' : 'Mastery unchanged';
+  }
+
+  String hintLevelLabel(int level) => isIndonesian
+      ? 'Tingkat bantuan $level'
+      : 'Hint level $level';
+
+  String get whyThisModuleLabel =>
+      isIndonesian ? 'Kenapa modul ini?' : 'Why this module?';
+
+  String get deleteSessionLabel => isIndonesian ? 'Hapus sesi' : 'Delete session';
+
+  String get deleteSessionConfirmBody => isIndonesian
+      ? 'Sesi chat ini akan dihapus permanen. Lanjutkan?'
+      : 'This chat session will be permanently deleted. Continue?';
+
   factory _LocalizedWorkspaceMaterial.forLanguage(String languageCode) {
     if (languageCode == 'id') {
       return const _LocalizedWorkspaceMaterial(
@@ -1531,6 +1812,15 @@ class _WorkspaceChatPanel extends StatelessWidget {
     required this.onGenerateVideo,
     required this.onStartChat,
     required this.onOpenCanvas,
+    required this.tutorDegraded,
+    required this.hintLevel,
+    required this.learningContext,
+    required this.imageHeaders,
+    this.lastTutorResponse,
+    this.lastMasteryUpdate,
+    this.canResumeVideo = false,
+    this.onResumeVideo,
+    this.onVideoViewed,
     this.weeklyReport,
     this.onDismissReport,
   });
@@ -1551,6 +1841,15 @@ class _WorkspaceChatPanel extends StatelessWidget {
   final VoidCallback onGenerateVideo;
   final VoidCallback onStartChat;
   final VoidCallback onOpenCanvas;
+  final bool tutorDegraded;
+  final int hintLevel;
+  final WorkspaceLearningContext? learningContext;
+  final Map<String, String> imageHeaders;
+  final WorkspaceTutorResponse? lastTutorResponse;
+  final WorkspaceMasteryUpdate? lastMasteryUpdate;
+  final bool canResumeVideo;
+  final VoidCallback? onResumeVideo;
+  final VoidCallback? onVideoViewed;
   final WeeklyLearningReport? weeklyReport;
   final VoidCallback? onDismissReport;
 
@@ -1562,6 +1861,17 @@ class _WorkspaceChatPanel extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           SpeechStatusBanner(locale: material.isIndonesian ? 'id-ID' : 'en-US'),
+          if (tutorDegraded) ...[
+            const SizedBox(height: 10),
+            _TutorOfflineBanner(material: material),
+          ],
+          if (learningContext?.hasDiagnosis ?? false) ...[
+            const SizedBox(height: 10),
+            _LearningContextCard(
+              context: learningContext!,
+              material: material,
+            ),
+          ],
           // ── Weekly report card (dismissible, shown at top of chat) ────────
           if (weeklyReport != null) ...[
             _WeeklyReportChatCard(
@@ -1609,7 +1919,9 @@ class _WorkspaceChatPanel extends StatelessWidget {
           ),
           for (final entry in chatEntries) ...[
             const SizedBox(height: 9),
-            if (entry.isCanvas)
+            if (entry.isSystemNote)
+              _WorkspaceTranscriptNote(text: entry.text ?? '')
+            else if (entry.snapshot != null)
               Align(
                 alignment: Alignment.centerRight,
                 child: _CanvasSnapshotBubble(
@@ -1618,10 +1930,25 @@ class _WorkspaceChatPanel extends StatelessWidget {
                 ),
               )
             else if (entry.isUser)
-              _WorkspaceBubble(
-                text: entry.text!,
-                isUser: true,
-                locale: material.isIndonesian ? 'id-ID' : 'en-US',
+              Align(
+                alignment: Alignment.centerRight,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    if (entry.imageUrl != null) ...[
+                      _WorkspaceImageAttachment(
+                        imageUrl: entry.imageUrl!,
+                        headers: imageHeaders,
+                      ),
+                      const SizedBox(height: 6),
+                    ],
+                    _WorkspaceBubble(
+                      text: entry.text!,
+                      isUser: true,
+                      locale: material.isIndonesian ? 'id-ID' : 'en-US',
+                    ),
+                  ],
+                ),
               )
             else
               _AssistantMessageFrame(
@@ -1633,6 +1960,10 @@ class _WorkspaceChatPanel extends StatelessWidget {
                       isUser: false,
                       locale: material.isIndonesian ? 'id-ID' : 'en-US',
                     ),
+                    if (entry.isDegraded) ...[
+                      const SizedBox(height: 6),
+                      _DegradedTurnChip(material: material),
+                    ],
                     if (entry.hasStructuredTutorData) ...[
                       const SizedBox(height: 8),
                       _StructuredTutorData(
@@ -1645,6 +1976,15 @@ class _WorkspaceChatPanel extends StatelessWidget {
                   ],
                 ),
               ),
+          ],
+          if (lastTutorResponse != null || lastMasteryUpdate != null) ...[
+            const SizedBox(height: 12),
+            _TutorFeedbackStrip(
+              response: lastTutorResponse,
+              mastery: lastMasteryUpdate,
+              hintLevel: hintLevel,
+              material: material,
+            ),
           ],
           if (contentMode == _WorkspaceContentMode.videoProcessing) ...[
             const SizedBox(height: 14),
@@ -1659,6 +1999,7 @@ class _WorkspaceChatPanel extends StatelessWidget {
               artifact: latestVideoArtifact,
               status: latestVideoStatus,
               material: material,
+              onViewed: onVideoViewed,
             ),
           ] else if (contentMode == _WorkspaceContentMode.videoFailed) ...[
             const SizedBox(height: 14),
@@ -1669,9 +2010,318 @@ class _WorkspaceChatPanel extends StatelessWidget {
                   material.videoGenerationFailedMessage,
               material: material,
               onRetry: onGenerateVideo,
+              onResume: canResumeVideo ? onResumeVideo : null,
             ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+/// Renders a learner-supplied image (canvas snapshot or photo) inside the
+/// transcript, so the drawing survives the server round-trip instead of being
+/// replaced by a text label.
+class _WorkspaceImageAttachment extends StatelessWidget {
+  const _WorkspaceImageAttachment({
+    required this.imageUrl,
+    required this.headers,
+  });
+
+  final String imageUrl;
+
+  /// The asset endpoint is auth-gated; without these the fetch 401s.
+  final Map<String, String> headers;
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: 220, maxWidth: 260),
+        child: Image.network(
+          imageUrl,
+          headers: headers,
+          fit: BoxFit.contain,
+          loadingBuilder: (context, child, progress) {
+            if (progress == null) {
+              return child;
+            }
+            return const SizedBox(
+              height: 120,
+              width: 160,
+              child: Center(
+                child: SizedBox(
+                  height: 18,
+                  width: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+            );
+          },
+          errorBuilder: (context, error, stackTrace) => const SizedBox(
+            height: 120,
+            width: 160,
+            child: Center(child: Icon(Icons.broken_image_outlined)),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A muted, centred marker for non-conversational transcript events.
+class _WorkspaceTranscriptNote extends StatelessWidget {
+  const _WorkspaceTranscriptNote({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Text(
+          text,
+          textAlign: TextAlign.center,
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            color: WicaraColors.ink.withValues(alpha: 0.55),
+            fontStyle: FontStyle.italic,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DegradedTurnChip extends StatelessWidget {
+  const _DegradedTurnChip({required this.material});
+
+  final _LocalizedWorkspaceMaterial material;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(Icons.cloud_off_rounded, size: 14),
+        const SizedBox(width: 5),
+        Text(
+          material.tutorOfflineTitle,
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+            color: WicaraColors.ink.withValues(alpha: 0.6),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Tells the learner the tutor is running on fallback text, and — crucially —
+/// that their phase will not advance until it recovers.
+class _TutorOfflineBanner extends StatelessWidget {
+  const _TutorOfflineBanner({required this.material});
+
+  final _LocalizedWorkspaceMaterial material;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: WicaraColors.fieldFill,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: WicaraColors.line, width: 1.2),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Icon(Icons.cloud_off_rounded, size: 18),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    material.tutorOfflineTitle,
+                    style: theme.textTheme.labelLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    material.tutorOfflineBody,
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Surfaces the judgement the backend already computed for the latest turn:
+/// correctness, misconception, mastery movement and current scaffold level.
+class _TutorFeedbackStrip extends StatelessWidget {
+  const _TutorFeedbackStrip({
+    required this.response,
+    required this.mastery,
+    required this.hintLevel,
+    required this.material,
+  });
+
+  final WorkspaceTutorResponse? response;
+  final WorkspaceMasteryUpdate? mastery;
+  final int hintLevel;
+  final _LocalizedWorkspaceMaterial material;
+
+  @override
+  Widget build(BuildContext context) {
+    final chips = <Widget>[];
+    final tutor = response;
+    if (tutor != null && tutor.isJudged) {
+      chips.add(
+        _FeedbackChip(
+          icon: switch (tutor.correctness) {
+            'correct' => Icons.check_circle_outline_rounded,
+            'partial' => Icons.adjust_rounded,
+            _ => Icons.refresh_rounded,
+          },
+          label: switch (tutor.correctness) {
+            'correct' => material.feedbackCorrectLabel,
+            'partial' => material.feedbackPartialLabel,
+            _ => material.feedbackIncorrectLabel,
+          },
+        ),
+      );
+    }
+    if (tutor?.hasMisconception ?? false) {
+      chips.add(
+        _FeedbackChip(
+          icon: Icons.psychology_alt_outlined,
+          label: material.misconceptionLabel,
+        ),
+      );
+    }
+    final delta = mastery?.delta;
+    if (delta != null && delta != 0) {
+      chips.add(
+        _FeedbackChip(
+          icon: delta > 0
+              ? Icons.trending_up_rounded
+              : Icons.trending_down_rounded,
+          label: material.masteryDeltaLabel(delta),
+        ),
+      );
+    }
+    if (hintLevel > 0) {
+      chips.add(
+        _FeedbackChip(
+          icon: Icons.lightbulb_outline_rounded,
+          label: material.hintLevelLabel(hintLevel),
+        ),
+      );
+    }
+    if (chips.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return Wrap(spacing: 8, runSpacing: 8, children: chips);
+  }
+}
+
+class _FeedbackChip extends StatelessWidget {
+  const _FeedbackChip({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: WicaraColors.fieldFill,
+        borderRadius: BorderRadius.circular(30),
+        border: Border.all(color: WicaraColors.line),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 15, color: WicaraColors.secondary),
+            const SizedBox(width: 6),
+            Text(label, style: Theme.of(context).textTheme.labelSmall),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Explains why the learner is in this module rather than their original
+/// target — the routing rationale the backend computes but never showed.
+class _LearningContextCard extends StatelessWidget {
+  const _LearningContextCard({required this.context, required this.material});
+
+  final WorkspaceLearningContext context;
+  final _LocalizedWorkspaceMaterial material;
+
+  @override
+  Widget build(BuildContext buildContext) {
+    final theme = Theme.of(buildContext);
+    final target = context.originalTargetLabel.trim();
+    final showTarget =
+        target.isNotEmpty &&
+        target.toLowerCase() != context.currentModuleLabel.trim().toLowerCase();
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: WicaraColors.line, width: 1.2),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(
+                  Icons.alt_route_rounded,
+                  size: 17,
+                  color: WicaraColors.secondary,
+                ),
+                const SizedBox(width: 7),
+                Text(
+                  material.whyThisModuleLabel,
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+            if (context.diagnosisReason.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(context.diagnosisReason, style: theme.textTheme.bodySmall),
+            ],
+            if (showTarget) ...[
+              const SizedBox(height: 6),
+              Text(
+                material.isIndonesian
+                    ? 'Target akhir: $target'
+                    : 'Final target: $target',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: WicaraColors.ink.withValues(alpha: 0.65),
+                ),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }
@@ -2311,11 +2961,15 @@ class _GeneratedWorkspaceVideoCard extends StatelessWidget {
     required this.material,
     this.artifact,
     this.status,
+    this.onViewed,
   });
 
   final _LocalizedWorkspaceMaterial material;
   final WorkspaceMediaArtifact? artifact;
   final WorkspaceAnimationJobStatus? status;
+
+  /// Fired when playback actually starts, so engagement is measurable.
+  final VoidCallback? onViewed;
 
   @override
   Widget build(BuildContext context) {
@@ -2447,6 +3101,7 @@ class _GeneratedWorkspaceVideoCard extends StatelessWidget {
                                   context,
                                 )?.stop(),
                               );
+                              onViewed?.call();
                               showDialog<void>(
                                 context: context,
                                 builder: (context) {
@@ -2537,11 +3192,16 @@ class _WorkspaceVideoFailedCard extends StatelessWidget {
     required this.errorMessage,
     required this.material,
     required this.onRetry,
+    this.onResume,
   });
 
   final String errorMessage;
   final _LocalizedWorkspaceMaterial material;
   final VoidCallback onRetry;
+
+  /// Set when a render is still in flight (e.g. after a polling timeout), so
+  /// the learner can re-attach instead of paying to generate it again.
+  final VoidCallback? onResume;
 
   @override
   Widget build(BuildContext context) {
@@ -2560,10 +3220,22 @@ class _WorkspaceVideoFailedCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 12),
-          OutlinedButton.icon(
-            onPressed: onRetry,
-            icon: const Icon(Icons.refresh_rounded),
-            label: Text(material.retryGenerateVideoLabel),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              if (onResume != null)
+                FilledButton.icon(
+                  onPressed: onResume,
+                  icon: const Icon(Icons.link_rounded),
+                  label: Text(material.resumeVideoLabel),
+                ),
+              OutlinedButton.icon(
+                onPressed: onRetry,
+                icon: const Icon(Icons.refresh_rounded),
+                label: Text(material.retryGenerateVideoLabel),
+              ),
+            ],
           ),
         ],
       ),
@@ -3323,6 +3995,7 @@ class _WorkspaceFooter extends StatelessWidget {
     required this.onAdvancePhase,
     required this.onGenerateVideo,
     required this.canAdvancePhase,
+    required this.isSending,
     required this.isPhaseSubmitting,
     required this.isVideoGenerating,
     required this.canGenerateVideo,
@@ -3335,6 +4008,7 @@ class _WorkspaceFooter extends StatelessWidget {
   final VoidCallback onAdvancePhase;
   final VoidCallback onGenerateVideo;
   final bool canAdvancePhase;
+  final bool isSending;
   final bool isPhaseSubmitting;
   final bool isVideoGenerating;
   final bool canGenerateVideo;
@@ -3414,6 +4088,7 @@ class _WorkspaceFooter extends StatelessWidget {
             _WorkspaceComposerInput(
               controller: controller,
               onSend: onSend,
+              isSending: isSending,
               copy: copy,
             ),
           ],
@@ -3427,11 +4102,16 @@ class _WorkspaceComposerInput extends StatelessWidget {
   const _WorkspaceComposerInput({
     required this.controller,
     required this.onSend,
+    required this.isSending,
     required this.copy,
   });
 
   final TextEditingController controller;
   final VoidCallback onSend;
+
+  /// Blocks a second submit while one is in flight: two concurrent appends
+  /// collide on the server's per-session event index.
+  final bool isSending;
   final OnboardingCopy copy;
 
   @override
@@ -3448,7 +4128,8 @@ class _WorkspaceComposerInput extends StatelessWidget {
                 minLines: 1,
                 maxLines: 4,
                 textInputAction: TextInputAction.send,
-                onSubmitted: (_) => onSend(),
+                enabled: !isSending,
+                onSubmitted: isSending ? null : (_) => onSend(),
                 decoration: InputDecoration(
                   hintText: copy.askOrReflectHereHint,
                   filled: true,
@@ -3483,7 +4164,9 @@ class _WorkspaceComposerInput extends StatelessWidget {
               width: 49,
               height: 49,
               decoration: BoxDecoration(
-                color: WicaraColors.secondary,
+                color: isSending
+                    ? WicaraColors.secondary.withValues(alpha: 0.55)
+                    : WicaraColors.secondary,
                 borderRadius: BorderRadius.circular(27),
                 boxShadow: [
                   BoxShadow(
@@ -3494,8 +4177,17 @@ class _WorkspaceComposerInput extends StatelessWidget {
                 ],
               ),
               child: IconButton(
-                onPressed: onSend,
-                icon: const Icon(Icons.arrow_upward_rounded),
+                onPressed: isSending ? null : onSend,
+                icon: isSending
+                    ? const SizedBox(
+                        height: 18,
+                        width: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Icon(Icons.arrow_upward_rounded),
                 color: Colors.white,
               ),
             ),

@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 
 import '../core/accessibility/speech_accessibility_scope.dart';
@@ -272,7 +274,49 @@ class _UnavailableWorkspaceRepository implements WorkspaceRepository {
   Future<List<WorkspaceSessionSummary>> fetchSessionHistory({
     required String trackId,
     required String moduleId,
+    int limit = 20,
+    int offset = 0,
   }) {
+    throw UnimplementedError('WorkspaceRepository is not configured.');
+  }
+
+  @override
+  Future<void> deleteSession({
+    required String trackId,
+    required String moduleId,
+    required String workspaceId,
+  }) {
+    throw UnimplementedError('WorkspaceRepository is not configured.');
+  }
+
+  @override
+  Future<String> uploadCanvasImage({
+    required Uint8List bytes,
+    String filename = 'canvas.png',
+  }) {
+    throw UnimplementedError('WorkspaceRepository is not configured.');
+  }
+
+  @override
+  String imageAssetUrl(String imageAssetId) {
+    throw UnimplementedError('WorkspaceRepository is not configured.');
+  }
+
+  @override
+  Map<String, String> imageAssetHeaders() {
+    throw UnimplementedError('WorkspaceRepository is not configured.');
+  }
+
+  @override
+  Future<void> clearCachedSession({
+    required String trackId,
+    required String moduleId,
+  }) {
+    throw UnimplementedError('WorkspaceRepository is not configured.');
+  }
+
+  @override
+  Future<void> clearLocalSessions() {
     throw UnimplementedError('WorkspaceRepository is not configured.');
   }
 
@@ -287,6 +331,7 @@ class _UnavailableWorkspaceRepository implements WorkspaceRepository {
     required String eventType,
     String textPayload = '',
     Map<String, dynamic> metadata = const {},
+    String? imageAssetId,
   }) {
     throw UnimplementedError('WorkspaceRepository is not configured.');
   }

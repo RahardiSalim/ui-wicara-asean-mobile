@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -127,9 +128,144 @@ void main() {
     expect(requestedUri.path, '/api/v1/workspaces/workspace-1/advance-phase');
     expect(requestedUri.queryParameters, isEmpty);
   });
+
+  test('canvas events carry the uploaded image asset id', () async {
+    final bodies = <String>[];
+    final repository = await _repository(
+      MockClient((request) async {
+        bodies.add(request.body);
+        if (request.url.path.endsWith('/evidence/image-assets/upload')) {
+          return _jsonResponse({'id': 'asset-77', 'storage_path': 'a.png'});
+        }
+        return _jsonResponse({
+          'event': _eventJson(actorType: 'learner', text: ''),
+          'workspace': _workspaceJson(),
+        });
+      }),
+    );
+
+    final assetId = await repository.uploadCanvasImage(
+      bytes: Uint8List.fromList(const [1, 2, 3]),
+    );
+    await repository.appendEvent(
+      workspaceId: 'workspace-1',
+      eventType: 'canvas_sent',
+      imageAssetId: assetId,
+    );
+
+    expect(assetId, 'asset-77');
+    final eventBody = jsonDecode(bodies.last) as Map<String, dynamic>;
+    expect(eventBody['image_asset_id'], 'asset-77');
+    expect(
+      repository.imageAssetUrl('asset-77'),
+      'http://127.0.0.1:8000/api/v1/evidence/image-assets/asset-77/file',
+    );
+  });
+
+  test('events decode ids and timestamps the transcript needs', () async {
+    final repository = await _repository(
+      MockClient((request) async {
+        return _jsonResponse({
+          'event': {
+            ..._eventJson(actorType: 'learner', text: 'drawing'),
+            'image_asset_id': 'asset-9',
+            'media_artifact_id': 'artifact-9',
+            'input_event_id': 'input-9',
+            'created_at': '2026-05-18T04:05:06Z',
+          },
+          'workspace': _workspaceJson(),
+        });
+      }),
+    );
+
+    final result = await repository.appendEvent(
+      workspaceId: 'workspace-1',
+      eventType: 'canvas_sent',
+    );
+
+    expect(result.event.imageAssetId, 'asset-9');
+    expect(result.event.mediaArtifactId, 'artifact-9');
+    expect(result.event.inputEventId, 'input-9');
+    expect(result.event.hasImage, isTrue);
+    expect(result.event.createdAt?.toUtc().hour, 4);
+  });
+
+  test('degraded tutor turns are visible to the UI', () async {
+    final repository = await _repository(
+      MockClient((request) async {
+        return _jsonResponse({
+          'event': _eventJson(actorType: 'learner', text: 'hi'),
+          'tutor_response': {
+            'text': 'Fallback text',
+            'intent': 'ask_followup',
+            'next_actions': <String>[],
+            'next_phase_ready': false,
+            'degraded': true,
+          },
+          'workspace': {..._workspaceJson(), 'tutor_degraded': true},
+        });
+      }),
+    );
+
+    final result = await repository.appendEvent(
+      workspaceId: 'workspace-1',
+      eventType: 'text',
+      textPayload: 'hi',
+    );
+
+    expect(result.tutorResponse?.degraded, isTrue);
+    expect(result.workspace.tutorDegraded, isTrue);
+  });
+
+  test('session history requests a bounded page', () async {
+    late Uri requestedUri;
+    final repository = await _repository(
+      MockClient((request) async {
+        requestedUri = request.url;
+        return _jsonResponse({'sessions': <dynamic>[], 'total': 0});
+      }),
+    );
+
+    await repository.fetchSessionHistory(
+      trackId: 'track-1',
+      moduleId: 'module-1',
+      limit: 5,
+      offset: 10,
+    );
+
+    expect(requestedUri.queryParameters['limit'], '5');
+    expect(requestedUri.queryParameters['offset'], '10');
+  });
+
+  test('deleting the active session drops its cached pointer', () async {
+    final store = WorkspaceSessionStore();
+    await store.setActiveWorkspaceId(
+      trackId: 'track-1',
+      moduleId: 'module-1',
+      workspaceId: 'workspace-1',
+    );
+    final repository = await _repository(
+      MockClient((request) async => http.Response('', 204)),
+      workspaceSessionStore: store,
+    );
+
+    await repository.deleteSession(
+      trackId: 'track-1',
+      moduleId: 'module-1',
+      workspaceId: 'workspace-1',
+    );
+
+    expect(
+      store.workspaceIdFor(trackId: 'track-1', moduleId: 'module-1'),
+      isNull,
+    );
+  });
 }
 
-Future<ApiWorkspaceRepository> _repository(MockClient httpClient) async {
+Future<ApiWorkspaceRepository> _repository(
+  MockClient httpClient, {
+  WorkspaceSessionStore? workspaceSessionStore,
+}) async {
   final sessionStore = AuthSessionStore();
   await sessionStore.save(
     session: const AuthSession(
@@ -147,7 +283,7 @@ Future<ApiWorkspaceRepository> _repository(MockClient httpClient) async {
       httpClient: httpClient,
     ),
     sessionStore: sessionStore,
-    workspaceSessionStore: WorkspaceSessionStore(),
+    workspaceSessionStore: workspaceSessionStore ?? WorkspaceSessionStore(),
   );
 }
 
