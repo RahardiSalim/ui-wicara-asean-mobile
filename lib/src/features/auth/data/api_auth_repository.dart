@@ -92,6 +92,18 @@ class ApiAuthRepository implements AuthRepository {
   }
 
   @override
+  Future<void> requestPasswordReset(String email) async {
+    try {
+      await _apiClient.postJson(
+        '/api/v1/auth/password-reset',
+        body: {'email': email.trim()},
+      );
+    } on ApiClientException catch (error) {
+      throw AuthException(error.message);
+    }
+  }
+
+  @override
   Future<AuthSession> signInWithGoogle({required AuthRole role}) async {
     try {
       final googleSignIn = _googleSignIn;
@@ -221,11 +233,16 @@ class ApiAuthRepository implements AuthRepository {
   AuthSession _toAuthSession(Map<String, dynamic> json, AuthRole role) {
     final token = (json['token'] ?? '').toString().trim();
     final refresh = (json['refresh_token'] ?? '').toString().trim();
+    final backendRole = (json['role'] ?? '').toString().trim();
+    final resolvedRole = AuthRole.values.firstWhere(
+      (candidate) => candidate.name == backendRole,
+      orElse: () => AuthRole.learner,
+    );
 
     return AuthSession(
       userId: (json['user_id'] ?? '').toString(),
       displayName: (json['display_name'] ?? '').toString(),
-      role: role,
+      role: resolvedRole,
       onboardingCompleted: json['onboarding_completed'] == true,
       token: token.isEmpty ? null : token,
       refreshToken: refresh.isEmpty ? null : refresh,

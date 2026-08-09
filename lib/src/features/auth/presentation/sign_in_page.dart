@@ -14,7 +14,6 @@ import '../domain/auth_repository.dart';
 import '../../onboarding/application/onboarding_controller.dart';
 import '../../onboarding/domain/onboarding_copy.dart';
 import 'widgets/google_sign_in_action.dart';
-import 'widgets/role_pill.dart';
 import 'widgets/wicara_text_field.dart';
 
 enum _AuthMode { login, register }
@@ -38,7 +37,7 @@ class _SignInPageState extends State<SignInPage> {
   final _nameController = TextEditingController();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
-  final _role = AuthRole.learner;
+  AuthRole _role = AuthRole.learner;
 
   _AuthMode _mode = _AuthMode.login;
   bool _isPasswordHidden = true;
@@ -193,6 +192,132 @@ class _SignInPageState extends State<SignInPage> {
     );
   }
 
+  Future<void> _showPasswordResetDialog() async {
+    final emailController = TextEditingController(
+      text: _emailController.text.trim(),
+    );
+    final formKey = GlobalKey<FormState>();
+    var isLoading = false;
+
+    final didRequest = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (context, setDialogState) {
+            Future<void> requestReset() async {
+              if (isLoading || !formKey.currentState!.validate()) {
+                return;
+              }
+
+              setDialogState(() => isLoading = true);
+              try {
+                await widget.authController.requestPasswordReset(
+                  emailController.text.trim(),
+                );
+                if (dialogContext.mounted) {
+                  Navigator.of(dialogContext).pop(true);
+                }
+              } on AuthException catch (error) {
+                if (dialogContext.mounted) {
+                  setDialogState(() => isLoading = false);
+                  ScaffoldMessenger.of(dialogContext)
+                    ..hideCurrentSnackBar()
+                    ..showSnackBar(
+                      SnackBar(
+                        content: Text(error.message),
+                        behavior: SnackBarBehavior.floating,
+                      ),
+                    );
+                }
+              } catch (_) {
+                if (dialogContext.mounted) {
+                  setDialogState(() => isLoading = false);
+                  ScaffoldMessenger.of(dialogContext)
+                    ..hideCurrentSnackBar()
+                    ..showSnackBar(
+                      const SnackBar(
+                        content: Text('Unable to request a password reset.'),
+                        behavior: SnackBarBehavior.floating,
+                      ),
+                    );
+                }
+              }
+            }
+
+            return PopScope(
+              canPop: !isLoading,
+              child: AlertDialog(
+                title: const Text('Reset password'),
+                content: SizedBox(
+                  width: 360,
+                  child: Form(
+                    key: formKey,
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Enter your email and we will send you a link to choose a new password.',
+                        ),
+                        const SizedBox(height: 18),
+                        TextFormField(
+                          controller: emailController,
+                          enabled: !isLoading,
+                          autofocus: true,
+                          keyboardType: TextInputType.emailAddress,
+                          textInputAction: TextInputAction.done,
+                          decoration: const InputDecoration(
+                            labelText: 'Email',
+                            prefixIcon: Icon(Icons.mail_outline_rounded),
+                          ),
+                          validator: (value) {
+                            final email = value?.trim() ?? '';
+                            final isValid = RegExp(
+                              r'^[^\s@]+@[^\s@]+\.[^\s@]+$',
+                            ).hasMatch(email);
+                            return isValid
+                                ? null
+                                : 'Enter a valid email address.';
+                          },
+                          onFieldSubmitted: (_) => requestReset(),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                actions: [
+                  TextButton(
+                    onPressed: isLoading
+                        ? null
+                        : () => Navigator.of(dialogContext).pop(false),
+                    child: const Text('Cancel'),
+                  ),
+                  FilledButton(
+                    onPressed: isLoading ? null : requestReset,
+                    child: isLoading
+                        ? const SizedBox.square(
+                            dimension: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Text('Send reset link'),
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+    emailController.dispose();
+
+    if (didRequest == true && mounted) {
+      _showMessage(
+        'If an account exists for that email, a password reset link has been sent.',
+      );
+    }
+  }
+
   void _showMessage(String message) {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
@@ -309,7 +434,13 @@ class _SignInPageState extends State<SignInPage> {
                                       onSelected: _selectMode,
                                     ),
                                     const SizedBox(height: 22),
-                                    RolePill(role: _role, copy: copy),
+                                    _RoleSelector(
+                                      selectedRole: _role,
+                                      enabled: !_isSubmitting,
+                                      onSelected: (role) {
+                                        setState(() => _role = role);
+                                      },
+                                    ),
                                     const SizedBox(height: 30),
                                     Form(
                                       key: _formKey,
@@ -420,9 +551,9 @@ class _SignInPageState extends State<SignInPage> {
                                       Align(
                                         alignment: Alignment.centerRight,
                                         child: TextButton(
-                                          onPressed: () => _showMessage(
-                                            copy.passwordResetMockedMessage,
-                                          ),
+                                          onPressed: _isSubmitting
+                                              ? null
+                                              : _showPasswordResetDialog,
                                           style: TextButton.styleFrom(
                                             foregroundColor:
                                                 WicaraColors.secondary,
@@ -570,6 +701,65 @@ class _AuthModeOption extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _RoleSelector extends StatelessWidget {
+  const _RoleSelector({
+    required this.selectedRole,
+    required this.enabled,
+    required this.onSelected,
+  });
+
+  final AuthRole selectedRole;
+  final bool enabled;
+  final ValueChanged<AuthRole> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Continue as',
+          style: Theme.of(context).textTheme.labelLarge?.copyWith(
+            color: WicaraColors.text,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        const SizedBox(height: 10),
+        SizedBox(
+          width: double.infinity,
+          child: SegmentedButton<AuthRole>(
+            segments: const [
+              ButtonSegment<AuthRole>(
+                value: AuthRole.learner,
+                icon: Icon(Icons.school_outlined),
+                label: Text('Student'),
+              ),
+              ButtonSegment<AuthRole>(
+                value: AuthRole.teacher,
+                icon: Icon(Icons.co_present_outlined),
+                label: Text('Teacher'),
+              ),
+            ],
+            selected: {selectedRole},
+            onSelectionChanged: enabled
+                ? (selection) => onSelected(selection.first)
+                : null,
+            showSelectedIcon: false,
+            style: ButtonStyle(
+              visualDensity: VisualDensity.comfortable,
+              shape: WidgetStatePropertyAll(
+                RoundedRectangleBorder(
+                  borderRadius: BorderRadius.all(Radius.circular(11)),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
