@@ -7234,7 +7234,8 @@ class _ProfilePage extends StatelessWidget {
             const SizedBox(height: 28),
             _ProfileHeaderCard(
               snapshot: snapshot,
-              roleLabel: copy.learnerLabel,
+              roleLabel:
+                  authController.session?.role.label ?? copy.learnerLabel,
             ),
             const SizedBox(height: 22),
             _ProfileSection(
