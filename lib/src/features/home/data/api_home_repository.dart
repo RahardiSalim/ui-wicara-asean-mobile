@@ -4,6 +4,7 @@ import '../../pretest/data/api_pretest_repository.dart';
 import '../../pretest/domain/pretest_models.dart';
 import '../domain/home_repository.dart';
 import '../domain/home_snapshot.dart';
+import '../../../core/localization/app_language.dart';
 
 class ApiHomeRepository implements HomeRepository {
   const ApiHomeRepository({
@@ -425,11 +426,12 @@ class ApiHomeRepository implements HomeRepository {
     final safeCurrent = (answered + 1)
         .clamp(1, totalQuestions == 0 ? 1 : totalQuestions)
         .toInt();
+    final sessionLanguage = _stringWithFallback(json['language'], 'id');
     return DailyEvaluationSession(
       sessionId: _string(json['session_id']),
-      title: 'Posttest Mastery Check',
+      title: AppLanguage.copy.posttestMasteryCheckLabel,
       status: _stringWithFallback(json['status'], 'active'),
-      language: _stringWithFallback(json['language'], 'id'),
+      language: sessionLanguage,
       source: _stringWithFallback(
         json['posttest_source'],
         'adaptive_generated',
@@ -759,7 +761,10 @@ class ApiHomeRepository implements HomeRepository {
     Map<String, dynamic> json,
   ) {
     return WeeklyLearningReport(
-      rangeLabel: _stringWithFallback(json['range_label'], 'This week'),
+      rangeLabel: _stringWithFallback(
+        json['range_label'],
+        AppLanguage.copy.thisWeekLabel,
+      ),
       rangeStart: _string(json['range_start']),
       rangeEnd: _string(json['range_end']),
       status: _stringWithFallback(json['status'], 'complete'),
@@ -881,7 +886,10 @@ class ApiHomeRepository implements HomeRepository {
   ConsistencySummary _consistencySummaryFromJson(Object? value) {
     final json = _map(value);
     return ConsistencySummary(
-      title: _stringWithFallback(json['title'], 'Consistency is compounding.'),
+      title: _stringWithFallback(
+        json['title'],
+        AppLanguage.copy.consistencyCompoundingLabel,
+      ),
       narrative: _string(json['narrative']),
       signal: _string(json['signal']),
     );
@@ -983,7 +991,7 @@ class ApiHomeRepository implements HomeRepository {
   String _requireToken() {
     final token = _sessionStore.accessToken;
     if (token == null || token.isEmpty) {
-      throw const ApiClientException('Please log in before opening dashboard.');
+      throw ApiClientException(AppLanguage.copy.loginBeforeDashboardLabel);
     }
     return token;
   }
@@ -1018,6 +1026,7 @@ class ApiHomeRepository implements HomeRepository {
       'ms' => 'Bahasa Melayu',
       'fil' => 'Filipino',
       'vi' => 'Vietnamese',
+      'th' => 'Thai',
       _ => code,
     };
   }

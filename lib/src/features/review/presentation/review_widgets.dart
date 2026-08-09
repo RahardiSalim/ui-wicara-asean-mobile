@@ -1,28 +1,12 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/localization/wicara_copy_scope.dart';
 import '../../../core/theme/wicara_colors.dart';
 
-/// Humanize a snake_case enum value (trigger / status / type) for display.
-String reviewLabel(String raw) {
-  const overrides = {
-    'low_confidence': 'Low confidence',
-    'risk_signal': 'Risk signal',
-    'sampled': 'Sampled',
-    'learner_flag': 'Learner flag',
-    'question': 'Question',
-    'diagnosis': 'Diagnosis',
-    'evaluation': 'Evaluation',
-    'open': 'Open',
-    'approved': 'Approved',
-    'rejected': 'Rejected',
-    'corrected': 'Corrected',
-  };
-  final hit = overrides[raw];
-  if (hit != null) return hit;
-  if (raw.isEmpty) return raw;
-  final spaced = raw.replaceAll('_', ' ');
-  return spaced[0].toUpperCase() + spaced.substring(1);
-}
+/// Localizes a snake_case enum value (trigger / status / type) for display,
+/// falling back to a humanized version of the raw value.
+String reviewLabel(BuildContext context, String raw) =>
+    WicaraCopyScope.of(context).reviewArtifactLabel(raw);
 
 class _Pill extends StatelessWidget {
   const _Pill({
@@ -74,12 +58,29 @@ class ArtifactTypeBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final (icon, bg, fg) = switch (type) {
-      'question' => (Icons.help_outline, WicaraColors.primarySoft, WicaraColors.primaryDeep),
-      'diagnosis' => (Icons.troubleshoot, WicaraColors.secondarySoft, WicaraColors.secondaryDeep),
-      'evaluation' => (Icons.fact_check_outlined, WicaraColors.mint, WicaraColors.accentMint),
+      'question' => (
+        Icons.help_outline,
+        WicaraColors.primarySoft,
+        WicaraColors.primaryDeep,
+      ),
+      'diagnosis' => (
+        Icons.troubleshoot,
+        WicaraColors.secondarySoft,
+        WicaraColors.secondaryDeep,
+      ),
+      'evaluation' => (
+        Icons.fact_check_outlined,
+        WicaraColors.mint,
+        WicaraColors.accentMint,
+      ),
       _ => (Icons.category_outlined, WicaraColors.line, WicaraColors.text),
     };
-    return _Pill(text: reviewLabel(type), background: bg, foreground: fg, icon: icon);
+    return _Pill(
+      text: reviewLabel(context, type),
+      background: bg,
+      foreground: fg,
+      icon: icon,
+    );
   }
 }
 
@@ -97,7 +98,11 @@ class StatusBadge extends StatelessWidget {
       'rejected' => (WicaraColors.glowPeach, WicaraColors.accentCoral),
       _ => (WicaraColors.line, WicaraColors.text),
     };
-    return _Pill(text: reviewLabel(status), background: bg, foreground: fg);
+    return _Pill(
+      text: reviewLabel(context, status),
+      background: bg,
+      foreground: fg,
+    );
   }
 }
 
@@ -116,7 +121,7 @@ class TriggerBadge extends StatelessWidget {
       _ => (Icons.label_outline, WicaraColors.text),
     };
     return _Pill(
-      text: reviewLabel(trigger),
+      text: reviewLabel(context, trigger),
       background: WicaraColors.fieldFill,
       foreground: fg,
       icon: icon,
@@ -131,7 +136,9 @@ class ConfidenceChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final fg = confidence < 0.55 ? WicaraColors.accentCoral : WicaraColors.accentMint;
+    final fg = confidence < 0.55
+        ? WicaraColors.accentCoral
+        : WicaraColors.accentMint;
     return _Pill(
       text: 'conf ${confidence.toStringAsFixed(2)}',
       background: WicaraColors.fieldFill,

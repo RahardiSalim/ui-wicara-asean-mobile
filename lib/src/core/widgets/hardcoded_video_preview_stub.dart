@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../localization/wicara_copy_scope.dart';
+
 class HardcodedVideoPreview extends StatelessWidget {
   const HardcodedVideoPreview({
     required this.videoUrl,
@@ -23,8 +25,10 @@ class HardcodedVideoPreview extends StatelessWidget {
           ScaffoldMessenger.of(context)
             ..hideCurrentSnackBar()
             ..showSnackBar(
-              const SnackBar(
-                content: Text('Video preview is available on web demo build.'),
+              SnackBar(
+                content: Text(
+                  WicaraCopyScope.read(context).videoPreviewWebOnlyLabel,
+                ),
                 behavior: SnackBarBehavior.floating,
               ),
             );

@@ -227,12 +227,14 @@ const onboardingGradeLevelOptions = <String>[
   '12',
 ];
 
+/// Shown in the picker using each language's own name, matching the six
+/// languages the backend localizes content for.
 const onboardingLanguageOptions = <String>[
   'English',
   'Bahasa Indonesia',
   'Bahasa Melayu',
-  'Vietnamese',
-  'Thai',
+  'Tiếng Việt',
+  'ภาษาไทย',
   'Filipino',
 ];
 

@@ -1,3 +1,5 @@
+import '../../../core/localization/app_language.dart';
+
 class LearningGoalException implements Exception {
   const LearningGoalException(this.message);
 
@@ -27,9 +29,7 @@ class ActiveGoalConflictException implements Exception {
   final String? trackId;
 
   @override
-  String toString() =>
-      'You already have an active goal for "$existingTopic". '
-      'Continue the existing goal or go back.';
+  String toString() => AppLanguage.copy.activeGoalConflictLabel(existingTopic);
 }
 
 class LearningGoalBootstrap {

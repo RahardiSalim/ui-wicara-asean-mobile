@@ -5,6 +5,7 @@ import '../../auth/data/auth_session_store.dart';
 import '../domain/workspace_models.dart';
 import '../domain/workspace_repository.dart';
 import 'workspace_session_store.dart' as store;
+import '../../../core/localization/app_language.dart';
 
 class ApiWorkspaceRepository implements WorkspaceRepository {
   const ApiWorkspaceRepository({
@@ -163,9 +164,7 @@ class ApiWorkspaceRepository implements WorkspaceRepository {
       );
       final assetId = _nullableString(json['id']);
       if (assetId == null) {
-        throw const WorkspaceException(
-          'The server did not return an image asset id.',
-        );
+        throw WorkspaceException(AppLanguage.copy.noImageAssetIdLabel);
       }
       return assetId;
     } on ApiClientException catch (error) {
@@ -345,7 +344,7 @@ class ApiWorkspaceRepository implements WorkspaceRepository {
   String _requireToken() {
     final token = _sessionStore.accessToken;
     if (token == null || token.isEmpty) {
-      throw const WorkspaceException('Please log in before opening workspace.');
+      throw WorkspaceException(AppLanguage.copy.loginBeforeWorkspaceLabel);
     }
     return token;
   }

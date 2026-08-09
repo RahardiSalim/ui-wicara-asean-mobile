@@ -2,6 +2,7 @@ import '../../../core/network/api_client.dart';
 import '../../auth/data/auth_session_store.dart';
 import '../../pretest/data/pretest_session_store.dart';
 import '../domain/learning_goal_repository.dart';
+import '../../../core/localization/app_language.dart';
 
 class ApiLearningGoalRepository implements LearningGoalRepository {
   const ApiLearningGoalRepository({
@@ -20,9 +21,7 @@ class ApiLearningGoalRepository implements LearningGoalRepository {
   Future<ActiveLearningGoal?> fetchActiveGoal() async {
     final token = _sessionStore.accessToken;
     if (token == null || token.isEmpty) {
-      throw const LearningGoalException(
-        'Please log in before creating a track.',
-      );
+      throw LearningGoalException(AppLanguage.copy.loginBeforeTrackLabel);
     }
 
     try {
@@ -132,7 +131,7 @@ class ApiLearningGoalRepository implements LearningGoalRepository {
     if (resolution.suggestedConcept == null) {
       throw LearningGoalException(
         resolution.clarificationQuestion ??
-            'No matching learning goal was found.',
+            AppLanguage.copy.noMatchingGoalLabel,
       );
     }
     return confirmResolvedGoal(resolutionId: resolution.resolutionId);
@@ -194,9 +193,7 @@ class ApiLearningGoalRepository implements LearningGoalRepository {
   String _requireToken() {
     final token = _sessionStore.accessToken;
     if (token == null || token.isEmpty) {
-      throw const LearningGoalException(
-        'Please log in before creating a track.',
-      );
+      throw LearningGoalException(AppLanguage.copy.loginBeforeTrackLabel);
     }
     return token;
   }

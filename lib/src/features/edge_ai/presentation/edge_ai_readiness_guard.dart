@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../../app/app_routes.dart';
+import '../../../core/localization/wicara_copy_scope.dart';
 import '../../pretest/data/pretest_session_store.dart';
 import '../data/litert_gemma_runtime.dart';
 import '../domain/edge_ai_runtime.dart';
@@ -27,27 +28,26 @@ class EdgeAiReadinessGuard extends StatefulWidget {
     if (!context.mounted) {
       return false;
     }
+    final copy = WicaraCopyScope.read(context);
     final action = await showDialog<_ReadinessAction>(
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) {
         return AlertDialog(
-          title: const Text('Model lokal belum siap'),
-          content: const Text(
-            'Model AI lokal belum siap. Install & initialize dulu sebelum mulai pretest.',
-          ),
+          title: Text(copy.edgeAiModelNotReadyTitle),
+          content: Text(copy.edgeAiModelNotReadyMessage),
           actions: [
             TextButton(
               onPressed: () {
                 Navigator.of(dialogContext).pop(_ReadinessAction.cancel);
               },
-              child: const Text('Batal'),
+              child: Text(copy.cancelLabel),
             ),
             FilledButton(
               onPressed: () {
                 Navigator.of(dialogContext).pop(_ReadinessAction.openSettings);
               },
-              child: const Text('Buka Pengaturan Edge AI'),
+              child: Text(copy.edgeAiOpenSettingsLabel),
             ),
           ],
         );
@@ -127,7 +127,7 @@ class _EdgeAiReadinessGuardState extends State<EdgeAiReadinessGuard> {
         .trim();
     if (targetConceptCode.isEmpty) {
       _redirectToLearningGoal(
-        'Pilih node target dulu di Learning Goal sebelum mulai pretest.',
+        WicaraCopyScope.read(context).edgeAiPickTargetNodeLabel,
       );
       return;
     }
@@ -147,7 +147,7 @@ class _EdgeAiReadinessGuardState extends State<EdgeAiReadinessGuard> {
     }
 
     _redirectToLearningGoal(
-      'Model lokal belum siap. Selesaikan install/initialize dulu lalu mulai pretest lagi.',
+      WicaraCopyScope.read(context).edgeAiFinishInstallLabel,
     );
   }
 
@@ -173,18 +173,18 @@ class _EdgeAiReadinessGuardState extends State<EdgeAiReadinessGuard> {
     if (!_isChecking) {
       return const SizedBox.shrink();
     }
-    return const Scaffold(
+    return Scaffold(
       body: SafeArea(
         child: Center(
           child: Padding(
-            padding: EdgeInsets.symmetric(horizontal: 28),
+            padding: const EdgeInsets.symmetric(horizontal: 28),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
-                CircularProgressIndicator(),
-                SizedBox(height: 14),
+                const CircularProgressIndicator(),
+                const SizedBox(height: 14),
                 Text(
-                  'Memeriksa kesiapan model AI lokal...',
+                  WicaraCopyScope.of(context).edgeAiCheckingReadinessLabel,
                   textAlign: TextAlign.center,
                 ),
               ],

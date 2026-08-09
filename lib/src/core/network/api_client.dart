@@ -3,7 +3,10 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
+
 import 'package:http_parser/http_parser.dart';
+
+import '../localization/app_language.dart';
 
 class ApiClient {
   ApiClient({required this.baseUrl, http.Client? httpClient})
@@ -82,12 +85,10 @@ class ApiClient {
           .post(uri, headers: mergedHeaders, body: jsonEncode(body ?? const {}))
           .timeout(timeout);
     } on TimeoutException {
-      throw ApiClientException(
-        'The WICARA server took too long to respond. Please try again.',
-      );
+      throw ApiClientException(AppLanguage.copy.serverTimeoutLabel);
     } on http.ClientException catch (error) {
       throw ApiClientException(
-        'Cannot reach the WICARA server at $baseUrl. ${error.message}',
+        AppLanguage.copy.serverUnreachableLabel(baseUrl, error.message),
       );
     }
 
@@ -135,12 +136,10 @@ class ApiClient {
           .then(http.Response.fromStream)
           .timeout(timeout);
     } on TimeoutException {
-      throw ApiClientException(
-        'The WICARA server took too long to upload the image. Please try again.',
-      );
+      throw ApiClientException(AppLanguage.copy.uploadTimeoutLabel);
     } on http.ClientException catch (error) {
       throw ApiClientException(
-        'Cannot reach the WICARA server at $baseUrl. ${error.message}',
+        AppLanguage.copy.serverUnreachableLabel(baseUrl, error.message),
       );
     }
 

@@ -1,3 +1,4 @@
+import '../../../core/localization/app_language.dart';
 import '../domain/edge_model_router.dart';
 
 class DeterministicLocalRuntime {
@@ -29,37 +30,37 @@ class DeterministicLocalRuntime {
 
   String _hint(String prompt) {
     if (prompt.contains('turunan') || prompt.contains('derivative')) {
-      return 'Petunjuk: lihat perubahan nilai fungsi saat x berubah sedikit, lalu coba bandingkan dua titik yang sangat dekat.';
+      return AppLanguage.copy.tutorHintDerivativeLabel;
     }
-    return 'Petunjuk: pecah masalah jadi tiga langkah kecil, cek asumsi setiap langkah, lalu lanjutkan satu per satu.';
+    return AppLanguage.copy.tutorHintGenericLabel;
   }
 
   String _evaluate(String prompt) {
     if (prompt.contains('2x') || prompt.contains('benar')) {
-      return 'Langkahmu sudah mendekati benar. Sekarang jelaskan kenapa aturan itu berlaku pada bentuk soalnya.';
+      return AppLanguage.copy.tutorEvaluateCloseLabel;
     }
-    return 'Jawabanmu belum konsisten. Coba cek kembali langkah pertama, lalu tulis ulang alasan untuk setiap transformasi.';
+    return AppLanguage.copy.tutorEvaluateInconsistentLabel;
   }
 
   String _reasoningGrade(String prompt) {
     if (prompt.length < 30) {
-      return 'Reasoning masih terlalu singkat; tambahkan alasan kenapa memilih operasi tersebut.';
+      return AppLanguage.copy.reasoningTooShortLabel;
     }
-    return 'Reasoning cukup jelas secara struktur; sekarang perkuat dengan satu contoh numerik singkat.';
+    return AppLanguage.copy.reasoningClearLabel;
   }
 
   String _quizPrompt(String prompt) {
-    return 'Coba jawab: jika f(x)=x^2, berapa turunan f\'(x), dan kenapa?';
+    return AppLanguage.copy.quizPromptLabel;
   }
 
   String _summary(String prompt) {
-    return 'Ringkas: fokus ke konsep inti, satu aturan utama, dan satu kesalahan umum yang perlu dihindari.';
+    return AppLanguage.copy.summaryFallbackLabel;
   }
 
   String _explainFallback(String prompt) {
     if (prompt.contains('turunan') || prompt.contains('derivative')) {
-      return 'Turunan menggambarkan seberapa cepat nilai fungsi berubah terhadap perubahan x. Bayangkan sebagai kemiringan garis singgung pada kurva di satu titik.';
+      return AppLanguage.copy.explainDerivativeLabel;
     }
-    return 'Kita mulai dari definisi inti, lanjut ke contoh singkat, lalu cek kembali dengan pertanyaan verifikasi.';
+    return AppLanguage.copy.explainGenericLabel;
   }
 }

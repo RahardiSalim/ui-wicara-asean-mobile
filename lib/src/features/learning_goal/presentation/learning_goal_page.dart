@@ -98,21 +98,18 @@ class _LearningGoalPageState extends State<LearningGoalPage> {
     final copy = OnboardingCopy.forLanguage(
       widget.onboardingController.profile.preferredLanguage,
     );
-    final isId = copy.isIndonesian;
 
     await showDialog<void>(
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) => AlertDialog(
-        title: Text(isId ? 'Goal aktif ditemukan' : 'Active goal found'),
+        title: Text(copy.activeGoalFoundLabel),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              isId
-                  ? 'Kamu sudah punya goal aktif untuk node ini:'
-                  : 'You already have an active goal for this node:',
+              copy.alreadyHaveActiveGoalNodeLabel,
               style: Theme.of(dialogContext).textTheme.bodySmall?.copyWith(
                 color: WicaraColors.text,
                 fontWeight: FontWeight.w600,
@@ -136,9 +133,7 @@ class _LearningGoalPageState extends State<LearningGoalPage> {
             ),
             const SizedBox(height: 10),
             Text(
-              isId
-                  ? 'Kamu bisa lanjutkan goal ini, atau kembali memilih node.'
-                  : 'You can continue this goal, or go back to choose a node.',
+              copy.canContinueGoalGoBackLabel,
               style: Theme.of(dialogContext).textTheme.bodySmall?.copyWith(
                 color: WicaraColors.text,
                 fontWeight: FontWeight.w600,
@@ -153,14 +148,14 @@ class _LearningGoalPageState extends State<LearningGoalPage> {
               Navigator.of(dialogContext).pop();
               setState(() => _resolution = null);
             },
-            child: Text(isId ? 'Kembali' : 'Back'),
+            child: Text(copy.backLabel2),
           ),
           TextButton(
             onPressed: () {
               Navigator.of(dialogContext).pop();
               _continueActiveGoal(nextAction: conflict.existingNextAction);
             },
-            child: Text(isId ? 'Lanjutkan goal ini' : 'Continue existing goal'),
+            child: Text(copy.continueExistingGoalLabel),
           ),
         ],
       ),
@@ -203,18 +198,12 @@ class _LearningGoalPageState extends State<LearningGoalPage> {
   String _primaryActionLabel(OnboardingCopy copy) {
     final resolution = _resolution;
     if (resolution == null) {
-      return copy.isIndonesian
-          ? 'Cari node goal belajar'
-          : 'Find learning goal node';
+      return copy.findLearningGoalNodeLabel;
     }
     if (resolution.suggestedConcept == null) {
-      return copy.isIndonesian
-          ? 'Cari ulang dengan query baru'
-          : 'Search again';
+      return copy.searchAgainLabel;
     }
-    return copy.isIndonesian
-        ? 'Cari ulang dengan query baru'
-        : 'Search again with a new query';
+    return copy.searchAgainNewQueryLabel;
   }
 
   Future<void> _selectRecommendedNode() async {
@@ -319,15 +308,12 @@ class _LearningGoalPageState extends State<LearningGoalPage> {
     final copy = OnboardingCopy.forLanguage(
       widget.onboardingController.profile.preferredLanguage,
     );
-    final isId = copy.isIndonesian;
-    final description = _nodeDescription(concept, isIndonesian: isId);
+    final description = _nodeDescription(concept, copy: copy);
     return await showDialog<bool>(
           context: context,
           builder: (dialogContext) => AlertDialog(
             title: Text(
-              isId
-                  ? 'Yakin ingin mengambil node ini?'
-                  : 'Are you sure you want to take this?',
+              copy.sureWantTakeLabel,
             ),
             content: Column(
               mainAxisSize: MainAxisSize.min,
@@ -356,7 +342,7 @@ class _LearningGoalPageState extends State<LearningGoalPage> {
                   alignment: Alignment.centerLeft,
                   child: ReadAloudButton(
                     textToRead: '${concept.title}. $description',
-                    locale: isId ? 'id-ID' : 'en-US',
+                    locale: copy.speechLocale,
                   ),
                 ),
               ],
@@ -364,11 +350,11 @@ class _LearningGoalPageState extends State<LearningGoalPage> {
             actions: [
               TextButton(
                 onPressed: () => Navigator.of(dialogContext).pop(false),
-                child: Text(isId ? 'Pilih node lain' : 'Choose another node'),
+                child: Text(copy.chooseAnotherNodeLabel),
               ),
               FilledButton(
                 onPressed: () => Navigator.of(dialogContext).pop(true),
-                child: Text(isId ? 'Mulai pretest' : 'Start pretest'),
+                child: Text(copy.startPretestLabel),
               ),
             ],
           ),
@@ -383,8 +369,7 @@ class _LearningGoalPageState extends State<LearningGoalPage> {
     final copy = OnboardingCopy.forLanguage(
       widget.onboardingController.profile.preferredLanguage,
     );
-    final isId = copy.isIndonesian;
-    final description = _nodeDescription(concept, isIndonesian: isId);
+    final description = _nodeDescription(concept, copy: copy);
     final confidence = ((concept.confidence ?? resolution.confidence) * 100)
         .round();
 
@@ -405,7 +390,7 @@ class _LearningGoalPageState extends State<LearningGoalPage> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Text(
-                isId ? 'Detail node' : 'Node detail',
+                copy.nodeDetailLabel,
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
                   color: WicaraColors.text,
                   fontWeight: FontWeight.w800,
@@ -423,7 +408,7 @@ class _LearningGoalPageState extends State<LearningGoalPage> {
               ),
               const SizedBox(height: 8),
               Text(
-                isId ? 'Deskripsi' : 'Description',
+                copy.descriptionLabel,
                 style: Theme.of(context).textTheme.labelMedium?.copyWith(
                   color: WicaraColors.text,
                   fontWeight: FontWeight.w800,
@@ -453,21 +438,21 @@ class _LearningGoalPageState extends State<LearningGoalPage> {
                 alignment: Alignment.centerLeft,
                 child: ReadAloudButton(
                   textToRead: '${concept.title}. $description',
-                  locale: isId ? 'id-ID' : 'en-US',
+                  locale: copy.speechLocale,
                 ),
               ),
               const SizedBox(height: 18),
               _NodeDetailRow(
-                label: isId ? 'Mata pelajaran' : 'Subject',
+                label: copy.subjectLabel2,
                 value: _subjectLabel(
                   concept.subjectCode.isEmpty
                       ? concept.subject
                       : concept.subjectCode,
-                  isIndonesian: isId,
+                  copy: copy,
                 ),
               ),
               _NodeDetailRow(
-                label: isId ? 'Kecocokan' : 'Match',
+                label: copy.matchLabel,
                 value: '$confidence%',
               ),
               if (concept.levelNote != null) ...[
@@ -490,7 +475,7 @@ class _LearningGoalPageState extends State<LearningGoalPage> {
                     _openKnowledgeMap();
                   },
                   icon: const Icon(Icons.account_tree_outlined, size: 18),
-                  label: Text(isId ? 'Lihat graph' : 'See graph'),
+                  label: Text(copy.seeGraphLabel),
                 ),
               ),
             ],
@@ -540,7 +525,7 @@ class _LearningGoalPageState extends State<LearningGoalPage> {
           widget.onboardingController.profile.preferredLanguage,
         );
         final profile = widget.onboardingController.profile;
-        final subjectChoices = _subjectChoices(isIndonesian: copy.isIndonesian);
+        final subjectChoices = _subjectChoices(copy: copy);
         final selectedSubjectCode = _effectiveSubjectCode(
           profile.selectedSubjects,
         );
@@ -699,7 +684,7 @@ class _LearningGoalPageState extends State<LearningGoalPage> {
                                           _SubjectSelector(
                                             choices: subjectChoices,
                                             selectedCode: selectedSubjectCode,
-                                            isIndonesian: copy.isIndonesian,
+                                            copy: copy,
                                             onSelected: _selectSubject,
                                           ),
                                           const SizedBox(height: 14),
@@ -720,8 +705,7 @@ class _LearningGoalPageState extends State<LearningGoalPage> {
                                                 : _resolution != null
                                                 ? _ResolutionNotice(
                                                     resolution: _resolution!,
-                                                    isIndonesian:
-                                                        copy.isIndonesian,
+                                                    copy: copy,
                                                     onRecommendedSelected:
                                                         _selectRecommendedNode,
                                                     onAlternativeSelected:
@@ -875,7 +859,7 @@ class _ResolvedLearningGoalLayout extends StatelessWidget {
                     _SubjectSelector(
                       choices: subjectChoices,
                       selectedCode: selectedSubjectCode,
-                      isIndonesian: copy.isIndonesian,
+                      copy: copy,
                       onSelected: onSubjectSelected,
                     ),
                     const SizedBox(height: 12),
@@ -893,7 +877,7 @@ class _ResolvedLearningGoalLayout extends StatelessWidget {
                   padding: const EdgeInsets.only(bottom: 4),
                   child: _ResolutionNotice(
                     resolution: resolution,
-                    isIndonesian: copy.isIndonesian,
+                    copy: copy,
                     onRecommendedSelected: onRecommendedSelected,
                     onAlternativeSelected: onAlternativeSelected,
                     onViewDetail: onViewDetail,
@@ -902,7 +886,7 @@ class _ResolvedLearningGoalLayout extends StatelessWidget {
               ),
               const SizedBox(height: 10),
               _ResolutionActionBar(
-                isIndonesian: copy.isIndonesian,
+                copy: copy,
                 onRefine: onRefine,
                 onOpenGraph: onOpenGraph,
               ),
@@ -962,7 +946,7 @@ class _LearningGoalFieldState extends State<_LearningGoalField> {
             Align(
               alignment: Alignment.centerRight,
               child: MicrophoneToggle(
-                locale: widget.copy.isIndonesian ? 'id-ID' : 'en-US',
+                locale: widget.copy.speechLocale,
                 onTranscript: _insertTranscript,
               ),
             ),
@@ -1017,13 +1001,13 @@ class _SubjectSelector extends StatelessWidget {
   const _SubjectSelector({
     required this.choices,
     required this.selectedCode,
-    required this.isIndonesian,
+    required this.copy,
     required this.onSelected,
   });
 
   final List<_SubjectChoice> choices;
   final String selectedCode;
-  final bool isIndonesian;
+  final OnboardingCopy copy;
   final ValueChanged<String> onSelected;
 
   @override
@@ -1032,7 +1016,7 @@ class _SubjectSelector extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Text(
-          isIndonesian ? 'Mata pelajaran' : 'Subject',
+          copy.subjectLabel2,
           style: Theme.of(context).textTheme.bodySmall?.copyWith(
             color: WicaraColors.text,
             fontSize: 12,
@@ -1057,7 +1041,7 @@ class _SubjectSelector extends StatelessWidget {
                     child: _SubjectChoiceTile(
                       choice: choice,
                       isSelected: choice.code == selectedCode,
-                      isIndonesian: isIndonesian,
+                      copy: copy,
                       onTap: choice.isLocked
                           ? null
                           : () => onSelected(choice.code),
@@ -1076,13 +1060,13 @@ class _SubjectChoiceTile extends StatelessWidget {
   const _SubjectChoiceTile({
     required this.choice,
     required this.isSelected,
-    required this.isIndonesian,
+    required this.copy,
     required this.onTap,
   });
 
   final _SubjectChoice choice;
   final bool isSelected;
-  final bool isIndonesian;
+  final OnboardingCopy copy;
   final VoidCallback? onTap;
 
   @override
@@ -1144,7 +1128,7 @@ class _SubjectChoiceTile extends StatelessWidget {
               if (isLocked) ...[
                 const SizedBox(width: 6),
                 Text(
-                  isIndonesian ? 'Kunci' : 'Lock',
+                  copy.lockLabel,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: WicaraColors.softMuted,
                     fontSize: 9,
@@ -1169,12 +1153,8 @@ class _PretestPreviewNotice extends StatelessWidget {
   Widget build(BuildContext context) {
     return _NoticeBox(
       icon: Icons.manage_search_rounded,
-      title: copy.isIndonesian
-          ? 'Cari goal belajar dulu'
-          : 'Find the learning goal first',
-      description: copy.isIndonesian
-          ? 'Tulis tujuanmu, lalu WICARA akan mencocokkan ke node materi. Pretest baru mulai setelah node ini kamu setujui.'
-          : 'Type your goal, then WICARA will match it to a material node. The pretest starts only after you confirm the node.',
+      title: copy.findLearningGoalFirstLabel,
+      description: copy.typeGoalThenWicaraWillLabel,
       color: WicaraColors.primary,
     );
   }
@@ -1199,14 +1179,14 @@ class _GeneratedPretestNotice extends StatelessWidget {
 class _ResolutionNotice extends StatelessWidget {
   const _ResolutionNotice({
     required this.resolution,
-    required this.isIndonesian,
+    required this.copy,
     required this.onRecommendedSelected,
     required this.onAlternativeSelected,
     required this.onViewDetail,
   });
 
   final LearningGoalResolution resolution;
-  final bool isIndonesian;
+  final OnboardingCopy copy;
   final VoidCallback onRecommendedSelected;
   final ValueChanged<LearningConceptSuggestion> onAlternativeSelected;
   final void Function(
@@ -1218,7 +1198,7 @@ class _ResolutionNotice extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final concept = resolution.suggestedConcept;
-    final locale = isIndonesian ? 'id-ID' : 'en-US';
+    final locale = copy.speechLocale;
     final speechText = _speechText(concept);
     if (concept == null) {
       return Container(
@@ -1236,7 +1216,7 @@ class _ResolutionNotice extends StatelessWidget {
           children: [
             _NoticeHeader(
               icon: Icons.manage_search_rounded,
-              title: isIndonesian ? 'Node belum pasti' : 'Node is not certain',
+              title: copy.nodeNotCertainLabel,
               trailing: resolution.searchScope.isEmpty
                   ? null
                   : resolution.searchScope.replaceAll('_', ' '),
@@ -1252,9 +1232,7 @@ class _ResolutionNotice extends StatelessWidget {
             const SizedBox(height: 9),
             Text(
               resolution.clarificationQuestion ??
-                  (isIndonesian
-                      ? 'Coba tambahkan kelas, mata pelajaran, atau topik yang lebih spesifik.'
-                      : 'Try adding grade, subject, or a more specific topic.'),
+                  (copy.tryAddingGradeSubjectMoreLabel),
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: WicaraColors.text,
                 fontWeight: FontWeight.w700,
@@ -1268,9 +1246,7 @@ class _ResolutionNotice extends StatelessWidget {
             if (resolution.alternatives.isNotEmpty) ...[
               const SizedBox(height: 13),
               Text(
-                isIndonesian
-                    ? 'Pilih kandidat yang paling mirip'
-                    : 'Pick the closest candidate',
+                copy.pickClosestCandidateLabel,
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: WicaraColors.text,
                   fontWeight: FontWeight.w800,
@@ -1280,7 +1256,7 @@ class _ResolutionNotice extends StatelessWidget {
               for (final alternative in resolution.alternatives.take(4)) ...[
                 _NodeOptionCard(
                   suggestion: alternative,
-                  isIndonesian: isIndonesian,
+                  copy: copy,
                   onSelected: () => onAlternativeSelected(alternative),
                   onViewDetail: () => onViewDetail(alternative, resolution),
                 ),
@@ -1312,7 +1288,7 @@ class _ResolutionNotice extends StatelessWidget {
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  isIndonesian ? 'Node rekomendasi' : 'Recommended node',
+                  copy.recommendedNodeLabel,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: WicaraColors.text,
                     fontWeight: FontWeight.w800,
@@ -1329,14 +1305,14 @@ class _ResolutionNotice extends StatelessWidget {
           const SizedBox(height: 10),
           _NodeOptionCard(
             suggestion: concept,
-            isIndonesian: isIndonesian,
+            copy: copy,
             onSelected: onRecommendedSelected,
             onViewDetail: () => onViewDetail(concept, resolution),
           ),
           if (resolution.alternatives.isNotEmpty) ...[
             const SizedBox(height: 13),
             Text(
-              isIndonesian ? 'Kemungkinan node lain' : 'Other possible nodes',
+              copy.otherPossibleNodesLabel,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: WicaraColors.text,
                 fontWeight: FontWeight.w800,
@@ -1346,7 +1322,7 @@ class _ResolutionNotice extends StatelessWidget {
             for (final alternative in resolution.alternatives.take(3)) ...[
               _NodeOptionCard(
                 suggestion: alternative,
-                isIndonesian: isIndonesian,
+                copy: copy,
                 onSelected: () => onAlternativeSelected(alternative),
                 onViewDetail: () => onViewDetail(alternative, resolution),
               ),
@@ -1363,9 +1339,9 @@ class _ResolutionNotice extends StatelessWidget {
       if (resolution.clarificationQuestion case final question?) question,
       if (resolution.searchScopeReason case final reason?) reason,
       if (concept != null)
-        '${concept.title}. ${_nodeDescription(concept, isIndonesian: isIndonesian)}',
+        '${concept.title}. ${_nodeDescription(concept, copy: copy)}',
       for (final alternative in resolution.alternatives.take(4))
-        '${alternative.title}. ${_nodeDescription(alternative, isIndonesian: isIndonesian)}',
+        '${alternative.title}. ${_nodeDescription(alternative, copy: copy)}',
     ];
     return parts.join('. ');
   }
@@ -1373,12 +1349,12 @@ class _ResolutionNotice extends StatelessWidget {
 
 class _ResolutionActionBar extends StatelessWidget {
   const _ResolutionActionBar({
-    required this.isIndonesian,
+    required this.copy,
     required this.onRefine,
     required this.onOpenGraph,
   });
 
-  final bool isIndonesian;
+  final OnboardingCopy copy;
   final VoidCallback onRefine;
   final VoidCallback onOpenGraph;
 
@@ -1410,7 +1386,7 @@ class _ResolutionActionBar extends StatelessWidget {
               child: OutlinedButton.icon(
                 onPressed: onRefine,
                 icon: const Icon(Icons.edit_outlined, size: 18),
-                label: Text(isIndonesian ? 'Ubah prompt' : 'Edit prompt'),
+                label: Text(copy.editPromptLabel),
                 style: OutlinedButton.styleFrom(
                   minimumSize: const Size(0, 44),
                   foregroundColor: WicaraColors.text,
@@ -1424,7 +1400,7 @@ class _ResolutionActionBar extends StatelessWidget {
               child: FilledButton.icon(
                 onPressed: onOpenGraph,
                 icon: const Icon(Icons.account_tree_outlined, size: 18),
-                label: Text(isIndonesian ? 'Lihat graph' : 'See graph'),
+                label: Text(copy.seeGraphLabel),
                 style: FilledButton.styleFrom(
                   minimumSize: const Size(0, 44),
                   backgroundColor: WicaraColors.primary,
@@ -1443,13 +1419,13 @@ class _ResolutionActionBar extends StatelessWidget {
 class _NodeOptionCard extends StatelessWidget {
   const _NodeOptionCard({
     required this.suggestion,
-    required this.isIndonesian,
+    required this.copy,
     required this.onSelected,
     required this.onViewDetail,
   });
 
   final LearningConceptSuggestion suggestion;
-  final bool isIndonesian;
+  final OnboardingCopy copy;
   final VoidCallback onSelected;
   final VoidCallback onViewDetail;
 
@@ -1457,11 +1433,11 @@ class _NodeOptionCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final description = _nodeDescription(
       suggestion,
-      isIndonesian: isIndonesian,
+      copy: copy,
     );
     final gradeFit = _gradeFitDescription(
       suggestion,
-      isIndonesian: isIndonesian,
+      copy: copy,
     );
     return Material(
       color: Colors.white.withValues(alpha: 0.78),
@@ -1547,7 +1523,7 @@ class _NodeOptionCard extends StatelessWidget {
                 child: TextButton.icon(
                   onPressed: onViewDetail,
                   icon: const Icon(Icons.info_outline_rounded, size: 17),
-                  label: Text(isIndonesian ? 'Lihat detail' : 'View detail'),
+                  label: Text(copy.viewDetailLabel),
                   style: TextButton.styleFrom(
                     padding: EdgeInsets.zero,
                     minimumSize: const Size(0, 34),
@@ -1608,9 +1584,9 @@ class _NodeDetailRow extends StatelessWidget {
 
 String _nodeDescription(
   LearningConceptSuggestion suggestion, {
-  required bool isIndonesian,
+  required OnboardingCopy copy,
 }) {
-  final candidates = isIndonesian
+  final candidates = copy.isIndonesian
       ? [suggestion.idDesc, suggestion.description]
       : [suggestion.enDesc, suggestion.description];
   for (final candidate in candidates) {
@@ -1619,7 +1595,7 @@ String _nodeDescription(
       return description;
     }
   }
-  return isIndonesian ? 'Deskripsi tidak ditemukan.' : 'Description not found.';
+  return copy.descriptionNotFoundLabel;
 }
 
 String _courseDescriptionOnly(String value) {
@@ -1661,7 +1637,7 @@ String _courseDescriptionOnly(String value) {
 
 String _gradeFitDescription(
   LearningConceptSuggestion suggestion, {
-  required bool isIndonesian,
+  required OnboardingCopy copy,
 }) {
   final note = suggestion.levelNote?.trim();
   if (note != null && note.isNotEmpty) {
@@ -1669,17 +1645,11 @@ String _gradeFitDescription(
   }
   return switch (suggestion.gradeRelation) {
     'below_current_level' =>
-      isIndonesian
-          ? 'Node ini lebih rendah dari level kelasmu; cocok untuk memperkuat fondasi.'
-          : 'This node is below your grade level; it can strengthen foundations.',
+      copy.nodeBelowGradeLevelCanLabel,
     'above_current_level' =>
-      isIndonesian
-          ? 'Node ini lebih tinggi dari level kelasmu; mungkin terasa lebih menantang.'
-          : 'This node is above your grade level; it may feel more challenging.',
+      copy.nodeAboveGradeLevelMayLabel,
     'at_current_level' =>
-      isIndonesian
-          ? 'Node ini sesuai dengan level kelasmu.'
-          : 'This node fits your grade level.',
+      copy.nodeFitsGradeLevelLabel,
     _ => '',
   };
 }
@@ -1879,12 +1849,12 @@ const _learningGoalSubjectCodes = <String>[
   'chemistry',
 ];
 
-List<_SubjectChoice> _subjectChoices({required bool isIndonesian}) {
+List<_SubjectChoice> _subjectChoices({required OnboardingCopy copy}) {
   return [
     for (final code in _learningGoalSubjectCodes)
       _SubjectChoice(
         code: code,
-        label: _subjectLabel(code, isIndonesian: isIndonesian),
+        label: _subjectLabel(code, copy: copy),
         isLocked: code != 'math',
       ),
   ];
@@ -1907,12 +1877,12 @@ String _normalizeSubjectCode(String code) {
   return normalized;
 }
 
-String _subjectLabel(String code, {required bool isIndonesian}) {
+String _subjectLabel(String code, {required OnboardingCopy copy}) {
   return switch (_normalizeSubjectCode(code)) {
-    'math' => isIndonesian ? 'Matematika' : 'Math',
-    'physics' => isIndonesian ? 'Fisika' : 'Physics',
-    'chemistry' => isIndonesian ? 'Kimia' : 'Chemistry',
-    'biology' => isIndonesian ? 'Biologi' : 'Biology',
+    'math' => copy.mathLabel,
+    'physics' => copy.physicsLabel,
+    'chemistry' => copy.chemistryLabel,
+    'biology' => copy.biologyLabel,
     final value => value,
   };
 }

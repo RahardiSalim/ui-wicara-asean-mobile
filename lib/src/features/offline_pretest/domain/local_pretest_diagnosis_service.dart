@@ -3,6 +3,7 @@ import 'dart:convert';
 import '../../edge_ai/data/litert_gemma_runtime.dart';
 import '../../edge_ai/domain/edge_ai_models.dart';
 import '../../edge_ai/domain/edge_ai_runtime.dart';
+import '../../../core/localization/app_language.dart';
 
 class LocalPretestDiagnosisService {
   const LocalPretestDiagnosisService({this.runtime = defaultEdgeAiRuntime});
@@ -174,8 +175,7 @@ class LocalPretestDiagnosisService {
           requestId:
               'pretest_diagnosis_${DateTime.now().microsecondsSinceEpoch}',
           schemaName: 'pretest_diagnosis_report_v1',
-          system:
-              'Kamu adalah pelapor diagnostik pretest WICARA on-device. Tulis narasi spesifik berdasarkan soal & jawaban siswa yang diberikan, bukan generalisasi. Output JSON valid saja.',
+          system: AppLanguage.copy.diagnosisSystemPrompt,
           user: _diagnosisPrompt(diagnosis),
         ),
       );
@@ -295,29 +295,9 @@ class LocalPretestDiagnosisService {
     };
 
     return '''
-Tulis diagnosa pretest siswa. Bukan ringkasan, bukan motivasi - DIAGNOSA.
-Gunakan HANYA data di "nodes" di bawah.
-Bahasa: santai, langsung ke siswa ("Kamu ..."), tanpa jargon.
-Jika siswa_pakai_canvas=true, sebutkan bahwa siswa menulis/mencoret saat mengerjakan (sinyal effort).
+${AppLanguage.copy.diagnosisPromptInstructions}
 
-Aturan menulis tiap field:
-- "summary" (2-3 kalimat, kira-kira 80-120 kata):
-  sebut konsep target spesifik + 1 hal yang sudah dipahami (rujuk soal benar) + 1 hal yang masih kurang (rujuk soal salah).
-  Hindari kalimat motivasi ("semangat", "kamu pasti bisa").
-- "strengths" (1-3 poin, tiap poin 1-2 kalimat penuh):
-  format: "Di soal [inti pertanyaan], kamu [langkah yang benar]."
-  Wajib rujuk reasoning_siswa jika tersedia.
-- "gaps" (1-3 poin, tiap poin 2-3 kalimat penuh):
-  format: "Di soal [inti pertanyaan], kamu pilih [siswa_pilih] padahal benar [jawaban_benar]. [Kontraskan reasoning_siswa vs expected_reasoning atau jelaskan salahnya]."
-- "evidence_notes" (0-2 poin):
-  tulis pola lintas-soal yang konkret (mis. reasoning kosong di soal sulit, effort canvas muncul, dst).
-- "recommended_focus" (1-3 poin):
-  latihan konkret yang langsung memperbaiki gap (sebut sub-topik latihan, bukan "latihan lagi").
-
-DILARANG: kalimat generik ("perlu latihan lagi", "konsep belum kuat").
-Selalu sebut konten soal dari data.
-
-Output JSON valid saja:
+${AppLanguage.copy.outputValidJsonOnlyLabel}
 {
   "summary": "...",
   "strengths": ["..."],
@@ -562,51 +542,15 @@ ${jsonEncode(payload)}
     required Map<String, dynamic>? target,
     required String recommendedPath,
   }) {
-    final title = _string(target?['title'], fallback: 'Target concept');
-    return switch (recommendedPath) {
-      'review_only' => 'Kamu sudah siap di $title; cukup review singkat.',
-      'target_reinforcement' =>
-        'Kamu paham dasar $title, tapi perlu latihan versi lebih sulit.',
-      'target_from_basics' =>
-        '$title mulai terbentuk, tapi belum stabil di level sedang.',
-      'target_intro' =>
-        '$title masih menjadi gap utama; mulai dari pengantar konsep.',
-      'repair_prerequisites' =>
-        'Beberapa prasyarat $title perlu diperkuat dulu.',
-      'full_foundation_path' =>
-        'Fondasi sebelum $title perlu dibangun ulang dari prasyarat terdalam.',
-      _ => 'Diagnosis $title selesai.',
-    };
+    final title = _string(
+      target?['title'],
+      fallback: AppLanguage.copy.targetConceptFallbackTitle,
+    );
+    return AppLanguage.copy.diagnosisSummaryLabel(recommendedPath, title);
   }
 
   List<String> _recommendedFocus(String recommendedPath) {
-    return switch (recommendedPath) {
-      'review_only' => const <String>[
-        'Ringkas ulang konsep target',
-        'Kerjakan 1-2 soal penguatan ringan',
-      ],
-      'target_reinforcement' => const <String>[
-        'Latihan menengah menuju sulit pada target',
-        'Perbaiki kualitas reasoning tertulis',
-      ],
-      'target_from_basics' => const <String>[
-        'Ulang fondasi langsung sebelum target',
-        'Latihan bertahap easy -> medium',
-      ],
-      'target_intro' => const <String>[
-        'Mulai dari pengantar konsep target',
-        'Gunakan contoh konkret sebelum simbolik',
-      ],
-      'repair_prerequisites' => const <String>[
-        'Perkuat node prasyarat yang fragile/gap',
-        'Kembali ke target setelah prasyarat stabil',
-      ],
-      'full_foundation_path' => const <String>[
-        'Bangun ulang dari prasyarat terdalam',
-        'Naik bertahap berdasarkan depth graph',
-      ],
-      _ => const <String>[],
-    };
+    return AppLanguage.copy.diagnosisFocusLabels(recommendedPath);
   }
 }
 

@@ -15,6 +15,7 @@ import 'widgets/onboarding_progress.dart';
 import 'widgets/onboarding_select_field.dart';
 import 'widgets/preference_callout.dart';
 import 'widgets/subject_tile.dart';
+import '../../../core/localization/wicara_copy_scope.dart';
 
 class OnboardingPage extends StatefulWidget {
   const OnboardingPage({
@@ -444,7 +445,7 @@ class _OnboardingBackButton extends StatelessWidget {
     return Align(
       alignment: Alignment.centerLeft,
       child: IconButton(
-        tooltip: 'Back',
+        tooltip: WicaraCopyScope.of(context).backLabel,
         onPressed: onPressed,
         icon: const Icon(Icons.chevron_left_rounded),
         iconSize: 32,

@@ -3,6 +3,8 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../../../core/localization/wicara_copy_scope.dart';
+
 import '../../../app/app_routes.dart';
 import '../../../core/theme/wicara_colors.dart';
 import '../../../core/widgets/gradient_button.dart';
@@ -622,6 +624,7 @@ class _DevBypassSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final copy = WicaraCopyScope.of(context);
     return SafeArea(
       child: Padding(
         padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
@@ -630,7 +633,7 @@ class _DevBypassSheet extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              'Developer Bypass',
+              copy.devBypassTitle,
               style: Theme.of(context).textTheme.titleLarge?.copyWith(
                 fontSize: 20,
                 fontWeight: FontWeight.w700,
@@ -638,7 +641,7 @@ class _DevBypassSheet extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              'Skip real authentication in debug builds.',
+              copy.devBypassSubtitle,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                 color: WicaraColors.muted,
                 fontWeight: FontWeight.w500,
@@ -648,18 +651,16 @@ class _DevBypassSheet extends StatelessWidget {
             ListTile(
               contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.flag_outlined),
-              title: const Text('Start at onboarding'),
-              subtitle: const Text(
-                'Signed in, but onboarding not completed yet.',
-              ),
+              title: Text(copy.startAtOnboardingLabel),
+              subtitle: Text(copy.devOnboardingIncompleteLabel),
               onTap: () =>
                   Navigator.of(context).pop(_DevBypassTarget.onboarding),
             ),
             ListTile(
               contentPadding: EdgeInsets.zero,
               leading: const Icon(Icons.home_outlined),
-              title: const Text('Jump to home'),
-              subtitle: const Text('Signed in and marked onboarding complete.'),
+              title: Text(copy.jumpToHomeLabel),
+              subtitle: Text(copy.devSignedInLabel),
               onTap: () => Navigator.of(context).pop(_DevBypassTarget.home),
             ),
           ],

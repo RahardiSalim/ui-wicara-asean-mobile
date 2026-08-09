@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 
 import '../../edge_ai/data/litert_gemma_runtime.dart';
+import '../../onboarding/domain/onboarding_copy.dart';
 import '../../edge_ai/domain/edge_ai_models.dart';
 import '../../edge_ai/domain/edge_ai_runtime.dart';
 
@@ -60,10 +61,15 @@ class LocalPretestQuestionGenerator {
     required String conceptCode,
     required String conceptTitle,
     required String conceptDescription,
+    String language = 'id',
   }) async {
+    final copy = OnboardingCopy.forLanguage(language);
     final startedAt = DateTime.now();
     try {
-      final runtimeReady = await _ensureRuntimeReady(conceptCode: conceptCode);
+      final runtimeReady = await _ensureRuntimeReady(
+        conceptCode: conceptCode,
+        copy: copy,
+      );
       if (!runtimeReady) {
         _debugLog(
           'PACK_GEN[$conceptCode] runtime_not_ready -> fallback_deterministic',
@@ -77,8 +83,7 @@ class LocalPretestQuestionGenerator {
             maxAttempts: maxAttempts,
             progress: 1,
             completedSections: 0,
-            message:
-                'Model LiteRT belum siap / belum terpasang. Gunakan fallback lokal.',
+            message: copy.offlineRuntimeNotReadyLabel,
           ),
         );
         return null;
@@ -108,8 +113,11 @@ class LocalPretestQuestionGenerator {
             progress: ((attempt - 1) / maxAttempts).clamp(0, 1).toDouble(),
             completedSections: merged.length,
             estimatedRemainingSeconds: estimatedRemaining,
-            message:
-                'Generate soal lokal (percobaan $attempt/$maxAttempts, timeout ${perAttemptTimeout.inSeconds}s)...',
+            message: copy.offlineGeneratingAttemptLabel(
+              attempt,
+              maxAttempts,
+              perAttemptTimeout.inSeconds,
+            ),
           ),
         );
 
@@ -140,6 +148,7 @@ class LocalPretestQuestionGenerator {
                     conceptTitle: conceptTitle,
                     conceptDescription: conceptDescription,
                     missingDifficulties: missingDifficulties,
+                    copy: copy,
                   ),
                 ),
               )
@@ -183,11 +192,15 @@ class LocalPretestQuestionGenerator {
           }
           if (partial.isEmpty) {
             errors.add('attempt_$attempt: no_valid_questions');
-            attemptMessage =
-                'Output model belum valid, coba ulang ($attempt/$maxAttempts).';
+            attemptMessage = copy.offlineOutputInvalidLabel(
+              attempt,
+              maxAttempts,
+            );
           } else {
-            attemptMessage =
-                'Model menghasilkan ${partial.length} level valid (${partial.keys.join(', ')}).';
+            attemptMessage = copy.offlineValidLevelsLabel(
+              partial.length,
+              partial.keys.join(', '),
+            );
           }
         } on TimeoutException {
           errors.add('attempt_$attempt: timeout');
@@ -195,15 +208,19 @@ class LocalPretestQuestionGenerator {
             'PACK_GEN[$conceptCode] attempt=$attempt timeout -> cancel request_id=$requestId',
           );
           await _safeCancel(requestId);
-          attemptMessage =
-              'Percobaan $attempt timeout (${perAttemptTimeout.inSeconds}s). Retry...';
+          attemptMessage = copy.offlineAttemptTimeoutLabel(
+            attempt,
+            perAttemptTimeout.inSeconds,
+          );
         } catch (error) {
           errors.add('attempt_$attempt: ${error.runtimeType}');
           _debugLog(
             'PACK_GEN[$conceptCode] attempt=$attempt exception=${error.runtimeType}',
           );
-          attemptMessage =
-              'Percobaan $attempt gagal: ${error.runtimeType}. Melanjutkan retry.';
+          attemptMessage = copy.offlineAttemptFailedLabel(
+            attempt,
+            error.runtimeType,
+          );
         } finally {
           final duration = DateTime.now()
               .difference(requestStarted)
@@ -250,7 +267,7 @@ class LocalPretestQuestionGenerator {
           progress: 1,
           completedSections: merged.length,
           estimatedRemainingSeconds: 0,
-          message: _finalMessage(statusLabel, dropped),
+          message: _finalMessage(copy, statusLabel, dropped),
         ),
       );
       _debugLog(
@@ -281,14 +298,17 @@ class LocalPretestQuestionGenerator {
           maxAttempts: maxAttempts,
           progress: 1,
           completedSections: 0,
-          message: 'Generate soal lokal gagal. Pakai fallback template.',
+          message: copy.offlineGenerationFallbackLabel,
         ),
       );
       return null;
     }
   }
 
-  Future<bool> _ensureRuntimeReady({required String conceptCode}) async {
+  Future<bool> _ensureRuntimeReady({
+    required String conceptCode,
+    required OnboardingCopy copy,
+  }) async {
     try {
       var status = await runtime.getStatus();
       _debugLog(
@@ -315,7 +335,7 @@ class LocalPretestQuestionGenerator {
           progress: 0.03,
           completedSections: 0,
           estimatedRemainingSeconds: maxAttempts * 20,
-          message: 'Menyiapkan model lokal...',
+          message: copy.offlinePreparingModelLabel,
         ),
       );
       status = await runtime
@@ -338,6 +358,7 @@ class LocalPretestQuestionGenerator {
     required String conceptTitle,
     required String conceptDescription,
     required List<String> missingDifficulties,
+    required OnboardingCopy copy,
   }) {
     final compactDescription =
         _trimToNull(conceptDescription, maxLength: 180) ?? '';
@@ -348,16 +369,11 @@ class LocalPretestQuestionGenerator {
       'concept_code': conceptCode,
       'title': conceptTitle,
       'description': compactDescription,
-      'language': 'id',
+      'language': copy.languageCode,
       'must_generate_difficulties': requiredKeys,
     };
     return '''
-Buat soal pretest adaptif singkat dalam Bahasa Indonesia.
-Hanya keluarkan key difficulty berikut: ${requiredKeys.join(', ')}.
-Setiap soal wajib punya 4 opsi unik dan 1 jawaban benar.
-Hindari penjelasan panjang. Tetap ringkas.
-Field "explanation" WAJIB berupa langkah konkret bernomor (mis. "1) ... 2) ... 3) ..."),
-bukan definisi konsep umum.
+${copy.offlineQuestionPromptInstructions(requiredKeys.join(', '))}
 
 Return valid JSON only:
 {
@@ -765,12 +781,17 @@ int _estimateRemainingSeconds({
   return ((avgMs * remainingAttempts) / 1000).ceil();
 }
 
-String _finalMessage(String status, List<String> droppedDifficulties) {
+String _finalMessage(
+  OnboardingCopy copy,
+  String status,
+  List<String> droppedDifficulties,
+) {
   return switch (status) {
-    'ready' => 'Generate soal selesai.',
-    'partial' =>
-      'Sebagian soal valid. Drop: ${droppedDifficulties.join(', ')}.',
-    _ => 'Generate soal gagal. Gunakan fallback template.',
+    'ready' => copy.offlineGenerationDoneLabel,
+    'partial' => copy.offlineGenerationPartialLabel(
+      droppedDifficulties.join(', '),
+    ),
+    _ => copy.offlineGenerationFailedLabel,
   };
 }
 

@@ -4,6 +4,8 @@ import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
+import '../../../core/localization/wicara_copy_scope.dart';
+
 import '../../../core/accessibility/speech_accessibility_scope.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/theme/wicara_colors.dart';
@@ -11,6 +13,8 @@ import '../../../core/widgets/speech_controls.dart';
 import '../../home/domain/home_repository.dart';
 import '../../home/domain/home_snapshot.dart';
 import '../../onboarding/application/onboarding_controller.dart';
+import '../../onboarding/domain/copy_translations.dart';
+import '../../onboarding/domain/language_codes.dart';
 import '../../onboarding/domain/onboarding_copy.dart';
 import '../../pretest/presentation/widgets/rich_math_text.dart';
 import '../../pretest/presentation/widgets/fishbone_canvas.dart';
@@ -783,7 +787,12 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     // image the tutor is answering blind about work it cannot see.
     String? imageAssetId;
     try {
-      final png = await renderCanvasSnapshotPng(snapshot);
+      final png = await renderCanvasSnapshotPng(
+        snapshot,
+        copy: OnboardingCopy.forLanguage(
+          widget.onboardingController.profile.preferredLanguage,
+        ),
+      );
       if (png != null) {
         imageAssetId = await widget.workspaceRepository.uploadCanvasImage(
           bytes: png,
@@ -977,7 +986,7 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
   void _openCanvas() {
     showGeneralDialog<void>(
       context: context,
-      barrierLabel: 'Canvas workspace',
+      barrierLabel: WicaraCopyScope.of(context).canvasWorkspaceLabel,
       barrierDismissible: true,
       barrierColor: WicaraColors.ink.withValues(alpha: 0.14),
       transitionDuration: const Duration(milliseconds: 260),
@@ -1136,12 +1145,8 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
                                   ),
                                   label: Text(
                                     showHeaderDetails
-                                        ? (material.isIndonesian
-                                              ? 'Ringkas'
-                                              : 'Collapse')
-                                        : (material.isIndonesian
-                                              ? 'Detail'
-                                              : 'Details'),
+                                        ? material.collapseLabel
+                                        : material.detailsLabel,
                                   ),
                                   style: TextButton.styleFrom(
                                     padding: const EdgeInsets.symmetric(
@@ -1536,262 +1541,462 @@ class _WorkspaceHistorySheet extends StatelessWidget {
 }
 
 class _LocalizedWorkspaceMaterial {
-  const _LocalizedWorkspaceMaterial({
-    required this.isIndonesian,
-    required this.topicTitle,
-    required this.startChatTitle,
-    required this.startChatBody,
-    required this.startChatButtonLabel,
-    required this.loadingDescription,
-    required this.syncedDescription,
-  });
+  const _LocalizedWorkspaceMaterial(this.languageCode);
 
-  final bool isIndonesian;
-  final String topicTitle;
-  final String startChatTitle;
-  final String startChatBody;
-  final String startChatButtonLabel;
-  final String loadingDescription;
-  final String syncedDescription;
+  factory _LocalizedWorkspaceMaterial.forLanguage(String languageCode) =>
+      _LocalizedWorkspaceMaterial(normalizeLanguageCode(languageCode));
 
-  String get workspaceTitleLabel =>
-      isIndonesian ? 'Ruang belajar' : 'Workspace';
-  String get newChatLabel => isIndonesian ? 'Chat baru' : 'New chat';
-  String get chatHistoryTitle => isIndonesian ? 'Riwayat chat' : 'Chat history';
-  String get advancePhaseLabel =>
-      isIndonesian ? 'Lanjut fase' : 'Advance phase';
-  String get advancingPhaseLabel =>
-      isIndonesian ? 'Memindahkan fase...' : 'Advancing phase...';
-  String get phaseTransitionHint => isIndonesian
-      ? "Tekan 'Lanjut fase' kalau sudah paham."
-      : "Tap 'Advance phase' when you are ready.";
-  String phaseLabel(String phase) {
-    return switch (phase.trim().toLowerCase()) {
-      'engage' => isIndonesian ? 'Engage' : 'Engage',
-      'explore' => isIndonesian ? 'Explore' : 'Explore',
-      'explain' => isIndonesian ? 'Explain' : 'Explain',
-      'elaborate' => isIndonesian ? 'Elaborate' : 'Elaborate',
-      'evaluate' => isIndonesian ? 'Evaluate' : 'Evaluate',
-      _ => isIndonesian ? 'Engage' : 'Engage',
-    };
+  /// One of [supportedLanguageCodes]. English and Indonesian live inline
+  /// below; the other languages resolve through [copyTranslations] and fall
+  /// back to English when a key is missing.
+  final String languageCode;
+
+  bool get isIndonesian => languageCode == 'id';
+
+  /// BCP 47 tag for speech synthesis and recognition, which need a region.
+  String get speechLocale => OnboardingCopy.forLanguage(languageCode).speechLocale;
+
+  String _t(String key, {required String en, required String id}) {
+    switch (languageCode) {
+      case 'en':
+        return en;
+      case 'id':
+        return id;
+      default:
+        return copyTranslations[languageCode]?['workspace.$key'] ?? en;
+    }
   }
 
-  String get startPosttestButtonLabel =>
-      isIndonesian ? 'Mulai Posttest' : 'Start Posttest';
-  String get posttestReadyBody => isIndonesian
-      ? 'Mulai posttest sekarang? Ini akan menutup modul workspace dan menyiapkan sesi posttest.'
-      : 'Start posttest now? This will complete the workspace module and prepare the posttest session.';
-  String get cancelLabel => isIndonesian ? 'Batal' : 'Cancel';
-  String get startPosttestDialogLabel =>
-      isIndonesian ? 'Mulai posttest' : 'Start posttest';
-  String get posttestUnavailableMessage => isIndonesian
-      ? 'Posttest belum siap. Lanjutkan sesuai arahan tutor.'
-      : 'The posttest is not ready yet. Continue with the tutor guidance.';
-  String get workspaceNotReadyMessage =>
-      isIndonesian ? 'Workspace belum siap.' : 'Workspace is not ready yet.';
-  String get openTrackModuleMessage => isIndonesian
-      ? 'Buka modul track dari Beranda atau Antrian sebelum memakai workspace.'
-      : 'Open a track module from Home or Queue before using workspace.';
-  String get chatLoadingMessage => isIndonesian
-      ? 'Sesi chat masih dimuat.'
-      : 'Chat session is still loading.';
-  String get connectingWorkspaceMessage => isIndonesian
-      ? 'Menghubungkan ke workspace backend...'
-      : 'Connecting to backend workspace...';
-  String get savingEvidenceMessage => isIndonesian
-      ? 'Menyimpan bukti workspace...'
-      : 'Saving workspace evidence...';
-  String get queueingVideoMessage => isIndonesian
-      ? 'Menyiapkan pembuatan video...'
-      : 'Queueing video generation...';
-  String get videoQueuedMessage => isIndonesian
-      ? 'Video masuk antrean. Menunggu worker...'
-      : 'Video queued. Waiting for worker...';
-  String videoTimedOutMessage(int minutes) => isIndonesian
-      ? 'Pembuatan video melewati batas waktu setelah $minutes menit.'
-      : 'Video generation timed out after $minutes minutes.';
-  String get generationTimeoutMessage =>
-      isIndonesian ? 'Waktu pembuatan habis.' : 'Generation timeout.';
-  String get buildingScenesMessage => isIndonesian
-      ? 'Membangun scene, narasi, dan rendering...'
-      : 'Building scenes, narration, and rendering...';
+  /// Like [_t] but substitutes `{0}`, `{1}` … in the translated template.
+  /// The [en] and [id] variants are already interpolated by the caller.
+  String _tf(
+    String key, {
+    required String en,
+    required String id,
+    required List<Object?> args,
+  }) {
+    if (languageCode == 'en') return en;
+    if (languageCode == 'id') return id;
+    final template = copyTranslations[languageCode]?['workspace.$key'];
+    if (template == null) return en;
+    var result = template;
+    for (var i = 0; i < args.length; i++) {
+      result = result.replaceAll('{$i}', '${args[i]}');
+    }
+    return result;
+  }
+
+  String get topicTitle =>
+      _t('topicTitle', en: 'Learning topic', id: 'Topik pembelajaran');
+  String get startChatTitle =>
+      _t('startChatTitle', en: 'Start learning', id: 'Mulai sesi belajar');
+  String get startChatBody => _t(
+    'startChatBody',
+    en: 'The tutor will guide you from the diagnosis and learning phase stored by the backend.',
+    id: 'Tutor akan memandu dari diagnosis dan fase belajar yang tersimpan di backend.',
+  );
+  String get startChatButtonLabel => _t(
+    'startChatButtonLabel',
+    en: 'Start learning chat',
+    id: 'Mulai chat belajar',
+  );
+  String get loadingDescription => _t(
+    'loadingDescription',
+    en: 'Connecting this module to the backend learning context.',
+    id: 'Menghubungkan modul dengan konteks belajar dari backend.',
+  );
+  String get syncedDescription => _t(
+    'syncedDescription',
+    en: 'Conversation, canvas, media, and phase state are synced with the backend.',
+    id: 'Percakapan, kanvas, media, dan status fase disinkronkan dengan backend.',
+  );
+
+  String get workspaceTitleLabel =>
+      _t('workspaceTitleLabel', en: 'Workspace', id: 'Ruang belajar');
+  String get newChatLabel => _t('newChatLabel', en: 'New chat', id: 'Chat baru');
+  String get chatHistoryTitle =>
+      _t('chatHistoryTitle', en: 'Chat history', id: 'Riwayat chat');
+  String get advancePhaseLabel =>
+      _t('advancePhaseLabel', en: 'Advance phase', id: 'Lanjut fase');
+  String get advancingPhaseLabel => _t(
+    'advancingPhaseLabel',
+    en: 'Advancing phase...',
+    id: 'Memindahkan fase...',
+  );
+  String get phaseTransitionHint => _t(
+    'phaseTransitionHint',
+    en: "Tap 'Advance phase' when you are ready.",
+    id: "Tekan 'Lanjut fase' kalau sudah paham.",
+  );
+
+  /// The 5E phase names are kept untranslated on purpose — they are the
+  /// pedagogical model's proper names and are used as identifiers in the UI.
+  String phaseLabel(String phase) => switch (phase.trim().toLowerCase()) {
+    'explore' => 'Explore',
+    'explain' => 'Explain',
+    'elaborate' => 'Elaborate',
+    'evaluate' => 'Evaluate',
+    _ => 'Engage',
+  };
+
+  String get startPosttestButtonLabel => _t(
+    'startPosttestButtonLabel',
+    en: 'Start Posttest',
+    id: 'Mulai Posttest',
+  );
+  String get posttestReadyBody => _t(
+    'posttestReadyBody',
+    en: 'Start posttest now? This will complete the workspace module and prepare the posttest session.',
+    id: 'Mulai posttest sekarang? Ini akan menutup modul workspace dan menyiapkan sesi posttest.',
+  );
+  String get cancelLabel => _t('cancelLabel', en: 'Cancel', id: 'Batal');
+  String get startPosttestDialogLabel => _t(
+    'startPosttestDialogLabel',
+    en: 'Start posttest',
+    id: 'Mulai posttest',
+  );
+  String get posttestUnavailableMessage => _t(
+    'posttestUnavailableMessage',
+    en: 'The posttest is not ready yet. Continue with the tutor guidance.',
+    id: 'Posttest belum siap. Lanjutkan sesuai arahan tutor.',
+  );
+  String get workspaceNotReadyMessage => _t(
+    'workspaceNotReadyMessage',
+    en: 'Workspace is not ready yet.',
+    id: 'Workspace belum siap.',
+  );
+  String get openTrackModuleMessage => _t(
+    'openTrackModuleMessage',
+    en: 'Open a track module from Home or Queue before using workspace.',
+    id: 'Buka modul track dari Beranda atau Antrian sebelum memakai workspace.',
+  );
+  String get chatLoadingMessage => _t(
+    'chatLoadingMessage',
+    en: 'Chat session is still loading.',
+    id: 'Sesi chat masih dimuat.',
+  );
+  String get connectingWorkspaceMessage => _t(
+    'connectingWorkspaceMessage',
+    en: 'Connecting to backend workspace...',
+    id: 'Menghubungkan ke workspace backend...',
+  );
+  String get savingEvidenceMessage => _t(
+    'savingEvidenceMessage',
+    en: 'Saving workspace evidence...',
+    id: 'Menyimpan bukti workspace...',
+  );
+  String get queueingVideoMessage => _t(
+    'queueingVideoMessage',
+    en: 'Queueing video generation...',
+    id: 'Menyiapkan pembuatan video...',
+  );
+  String get videoQueuedMessage => _t(
+    'videoQueuedMessage',
+    en: 'Video queued. Waiting for worker...',
+    id: 'Video masuk antrean. Menunggu worker...',
+  );
+  String videoTimedOutMessage(int minutes) => _tf(
+    'videoTimedOutMessage',
+    en: 'Video generation timed out after $minutes minutes.',
+    id: 'Pembuatan video melewati batas waktu setelah $minutes menit.',
+    args: [minutes],
+  );
+  String get generationTimeoutMessage => _t(
+    'generationTimeoutMessage',
+    en: 'Generation timeout.',
+    id: 'Waktu pembuatan habis.',
+  );
+  String get buildingScenesMessage => _t(
+    'buildingScenesMessage',
+    en: 'Building scenes, narration, and rendering...',
+    id: 'Membangun scene, narasi, dan rendering...',
+  );
   String get generatingVideoTitle =>
-      isIndonesian ? 'Membuat video' : 'Generating video';
-  String get generatedVideoFallbackTitle =>
-      isIndonesian ? 'Video yang dibuat' : 'Generated video';
-  String get savedGeneratedVideoTitle =>
-      isIndonesian ? 'Video tersimpan' : 'Saved generated video';
-  String get generatedVideoSubtitle => isIndonesian
-      ? 'Rendering video selesai dan siap di workspace.'
-      : 'Video rendering finished and is ready in your workspace.';
-  String get aiVideoChip => isIndonesian ? 'Video AI' : 'AI video';
-  String get readyUrlChip => isIndonesian ? 'URL siap' : 'Ready URL';
-  String get playGeneratedVideoLabel =>
-      isIndonesian ? 'Putar video' : 'Play generated video';
-  String get videoUrlUnavailableLabel =>
-      isIndonesian ? 'URL video tidak tersedia' : 'Video URL unavailable';
-  String get videoGenerationFailedTitle =>
-      isIndonesian ? 'Pembuatan video gagal' : 'Video generation failed';
-  String get videoGenerationFailedMessage =>
-      isIndonesian ? 'Pembuatan video gagal.' : 'Video generation failed.';
-  String get retryGenerateVideoLabel =>
-      isIndonesian ? 'Coba buat video lagi' : 'Retry generate video';
-  String get generatingVideoButtonLabel =>
-      isIndonesian ? 'Membuat video...' : 'Generating video...';
-  String get generateVideoFromChatLabel => isIndonesian
-      ? 'Buat video dari chat ini'
-      : 'Generate video from this chat';
-  String get generatingVideoContextMessage => isIndonesian
-      ? 'Membuat video dari konteks percakapan terakhirmu...'
-      : 'Generating video from your latest conversation context...';
-  String get videoReadyMessage => isIndonesian
-      ? 'Video siap. Kamu bisa memutarnya dari kartu chat terbaru.'
-      : 'Video ready. You can play it from the latest chat card.';
-  String get failedToLoadVideoMessage => isIndonesian
-      ? 'Gagal memuat video dari URL backend.'
-      : 'Failed to load video from backend URL.';
-  String get openFullscreenTooltip =>
-      isIndonesian ? 'Buka layar penuh' : 'Open fullscreen';
-  String durationChipLabel(String durationLabel) =>
-      isIndonesian ? 'Durasi $durationLabel' : 'Duration $durationLabel';
-  String get canvasAttachedPrompt => isIndonesian
-      ? 'Kanvas sudah terlampir. Tambahkan sketsa lain jika perlu.'
-      : 'Canvas work is attached. Add another sketch if needed.';
-  String get canvasPrompt => isIndonesian
-      ? 'Butuh papan tulis? Buka kanvas dan kirim sketsamu di sini.'
-      : 'Need a whiteboard? Open canvas and send your sketch here.';
-  String get openCanvasLabel => isIndonesian ? 'Buka kanvas' : 'Open canvas';
-  String get useCanvasLabel => isIndonesian ? 'Pakai kanvas' : 'Use canvas';
+      _t('generatingVideoTitle', en: 'Generating video', id: 'Membuat video');
+  String get generatedVideoFallbackTitle => _t(
+    'generatedVideoFallbackTitle',
+    en: 'Generated video',
+    id: 'Video yang dibuat',
+  );
+  String get savedGeneratedVideoTitle => _t(
+    'savedGeneratedVideoTitle',
+    en: 'Saved generated video',
+    id: 'Video tersimpan',
+  );
+  String get generatedVideoSubtitle => _t(
+    'generatedVideoSubtitle',
+    en: 'Video rendering finished and is ready in your workspace.',
+    id: 'Rendering video selesai dan siap di workspace.',
+  );
+  String get aiVideoChip => _t('aiVideoChip', en: 'AI video', id: 'Video AI');
+  String get readyUrlChip =>
+      _t('readyUrlChip', en: 'Ready URL', id: 'URL siap');
+  String get playGeneratedVideoLabel => _t(
+    'playGeneratedVideoLabel',
+    en: 'Play generated video',
+    id: 'Putar video',
+  );
+  String get videoUrlUnavailableLabel => _t(
+    'videoUrlUnavailableLabel',
+    en: 'Video URL unavailable',
+    id: 'URL video tidak tersedia',
+  );
+  String get videoGenerationFailedTitle => _t(
+    'videoGenerationFailedTitle',
+    en: 'Video generation failed',
+    id: 'Pembuatan video gagal',
+  );
+  String get videoGenerationFailedMessage => _t(
+    'videoGenerationFailedMessage',
+    en: 'Video generation failed.',
+    id: 'Pembuatan video gagal.',
+  );
+  String get retryGenerateVideoLabel => _t(
+    'retryGenerateVideoLabel',
+    en: 'Retry generate video',
+    id: 'Coba buat video lagi',
+  );
+  String get generatingVideoButtonLabel => _t(
+    'generatingVideoButtonLabel',
+    en: 'Generating video...',
+    id: 'Membuat video...',
+  );
+  String get generateVideoFromChatLabel => _t(
+    'generateVideoFromChatLabel',
+    en: 'Generate video from this chat',
+    id: 'Buat video dari chat ini',
+  );
+  String get generatingVideoContextMessage => _t(
+    'generatingVideoContextMessage',
+    en: 'Generating video from your latest conversation context...',
+    id: 'Membuat video dari konteks percakapan terakhirmu...',
+  );
+  String get videoReadyMessage => _t(
+    'videoReadyMessage',
+    en: 'Video ready. You can play it from the latest chat card.',
+    id: 'Video siap. Kamu bisa memutarnya dari kartu chat terbaru.',
+  );
+  String get failedToLoadVideoMessage => _t(
+    'failedToLoadVideoMessage',
+    en: 'Failed to load video from backend URL.',
+    id: 'Gagal memuat video dari URL backend.',
+  );
+  String get openFullscreenTooltip => _t(
+    'openFullscreenTooltip',
+    en: 'Open fullscreen',
+    id: 'Buka layar penuh',
+  );
+  String durationChipLabel(String durationLabel) => _tf(
+    'durationChipLabel',
+    en: 'Duration $durationLabel',
+    id: 'Durasi $durationLabel',
+    args: [durationLabel],
+  );
+  String get canvasAttachedPrompt => _t(
+    'canvasAttachedPrompt',
+    en: 'Canvas work is attached. Add another sketch if needed.',
+    id: 'Kanvas sudah terlampir. Tambahkan sketsa lain jika perlu.',
+  );
+  String get canvasPrompt => _t(
+    'canvasPrompt',
+    en: 'Need a whiteboard? Open canvas and send your sketch here.',
+    id: 'Butuh papan tulis? Buka kanvas dan kirim sketsamu di sini.',
+  );
+  String get openCanvasLabel =>
+      _t('openCanvasLabel', en: 'Open canvas', id: 'Buka kanvas');
+  String get useCanvasLabel =>
+      _t('useCanvasLabel', en: 'Use canvas', id: 'Pakai kanvas');
   String get canvasSentLabel =>
-      isIndonesian ? 'Kanvas terkirim' : 'Canvas sent';
-  String get explanationCardLabel =>
-      isIndonesian ? 'Kartu penjelasan' : 'Explanation card';
-  String get evidenceRequestLabel =>
-      isIndonesian ? 'Bukti yang diminta' : 'Evidence requested';
+      _t('canvasSentLabel', en: 'Canvas sent', id: 'Kanvas terkirim');
+  String get explanationCardLabel => _t(
+    'explanationCardLabel',
+    en: 'Explanation card',
+    id: 'Kartu penjelasan',
+  );
+  String get evidenceRequestLabel => _t(
+    'evidenceRequestLabel',
+    en: 'Evidence requested',
+    id: 'Bukti yang diminta',
+  );
   String get nextActionsLabel =>
-      isIndonesian ? 'Aksi berikutnya' : 'Next actions';
+      _t('nextActionsLabel', en: 'Next actions', id: 'Aksi berikutnya');
+
   String canvasSnapshotSentLabel(Object? count) {
-    final suffix = count == null
-        ? ''
-        : isIndonesian
-        ? ' ($count tanda)'
-        : ' ($count marks)';
-    return isIndonesian
-        ? 'Snapshot kanvas terkirim$suffix'
-        : 'Canvas snapshot sent$suffix';
+    if (count == null) {
+      return _t(
+        'canvasSnapshotSentLabel',
+        en: 'Canvas snapshot sent',
+        id: 'Snapshot kanvas terkirim',
+      );
+    }
+    return _tf(
+      'canvasSnapshotSentCountLabel',
+      en: 'Canvas snapshot sent ($count marks)',
+      id: 'Snapshot kanvas terkirim ($count tanda)',
+      args: [count],
+    );
   }
 
   String canvasMarksLabel(int count, bool hasAttachment) {
-    final markText = isIndonesian ? '$count tanda' : '$count marks';
     if (!hasAttachment) {
-      return markText;
+      return _tf(
+        'canvasMarksLabel',
+        en: '$count marks',
+        id: '$count tanda',
+        args: [count],
+      );
     }
-    return isIndonesian
-        ? '$markText - kertas terlampir'
-        : '$markText - paper attached';
+    return _tf(
+      'canvasMarksAttachedLabel',
+      en: '$count marks - paper attached',
+      id: '$count tanda - kertas terlampir',
+      args: [count],
+    );
   }
 
-  String historyButtonLabel(int count) =>
-      isIndonesian ? 'Riwayat ($count)' : 'History ($count)';
+  String historyButtonLabel(int count) => _tf(
+    'historyButtonLabel',
+    en: 'History ($count)',
+    id: 'Riwayat ($count)',
+    args: [count],
+  );
 
   String historySessionTitle(String title) =>
       title.isEmpty ? newChatLabel : title;
 
-  String historyMessageCountLabel(int count) {
-    if (isIndonesian) {
-      return '$count pesan';
-    }
-    return count == 1 ? '1 message' : '$count messages';
-  }
+  String historyMessageCountLabel(int count) => _tf(
+    'historyMessageCountLabel',
+    en: count == 1 ? '1 message' : '$count messages',
+    id: '$count pesan',
+    args: [count],
+  );
 
-  String workspaceSyncFailedMessage(String message) => isIndonesian
-      ? 'Sinkronisasi workspace gagal: $message'
-      : 'Workspace sync failed: $message';
+  String workspaceSyncFailedMessage(String message) => _tf(
+    'workspaceSyncFailedMessage',
+    en: 'Workspace sync failed: $message',
+    id: 'Sinkronisasi workspace gagal: $message',
+    args: [message],
+  );
 
-  String get imageSentLabel => isIndonesian ? 'Gambar terkirim' : 'Image sent';
+  String get imageSentLabel =>
+      _t('imageSentLabel', en: 'Image sent', id: 'Gambar terkirim');
 
-  String get videoRequestedNote =>
-      isIndonesian ? 'Video diminta di sini.' : 'A video was requested here.';
+  String get videoRequestedNote => _t(
+    'videoRequestedNote',
+    en: 'A video was requested here.',
+    id: 'Video diminta di sini.',
+  );
 
-  String canvasUploadFailedMessage(String message) => isIndonesian
-      ? 'Gambar kanvas gagal diunggah, tutor hanya menerima teks: $message'
-      : 'Canvas image upload failed, the tutor only received text: $message';
+  String canvasUploadFailedMessage(String message) => _tf(
+    'canvasUploadFailedMessage',
+    en: 'Canvas image upload failed, the tutor only received text: $message',
+    id: 'Gambar kanvas gagal diunggah, tutor hanya menerima teks: $message',
+    args: [message],
+  );
 
-  String get resumingVideoMessage => isIndonesian
-      ? 'Menyambung kembali ke proses render...'
-      : 'Re-attaching to the render in progress...';
+  String get resumingVideoMessage => _t(
+    'resumingVideoMessage',
+    en: 'Re-attaching to the render in progress...',
+    id: 'Menyambung kembali ke proses render...',
+  );
 
   String get resumeVideoLabel =>
-      isIndonesian ? 'Sambungkan lagi' : 'Re-attach';
+      _t('resumeVideoLabel', en: 'Re-attach', id: 'Sambungkan lagi');
 
-  String get tutorOfflineTitle =>
-      isIndonesian ? 'Tutor AI sedang tidak tersedia' : 'AI tutor unavailable';
+  String get tutorOfflineTitle => _t(
+    'tutorOfflineTitle',
+    en: 'AI tutor unavailable',
+    id: 'Tutor AI sedang tidak tersedia',
+  );
 
-  String get tutorOfflineBody => isIndonesian
-      ? 'Balasan berikut memakai teks cadangan, jadi fase belajar tidak akan maju sampai tutor kembali. Coba lagi sebentar lagi.'
-      : 'The replies below use fallback text, so your phase will not advance until the tutor is back. Try again shortly.';
+  String get tutorOfflineBody => _t(
+    'tutorOfflineBody',
+    en: 'The replies below use fallback text, so your phase will not advance until the tutor is back. Try again shortly.',
+    id: 'Balasan berikut memakai teks cadangan, jadi fase belajar tidak akan maju sampai tutor kembali. Coba lagi sebentar lagi.',
+  );
 
-  String get feedbackCorrectLabel => isIndonesian ? 'Tepat' : 'Correct';
+  String get feedbackCorrectLabel =>
+      _t('feedbackCorrectLabel', en: 'Correct', id: 'Tepat');
   String get feedbackPartialLabel =>
-      isIndonesian ? 'Hampir tepat' : 'Partly there';
+      _t('feedbackPartialLabel', en: 'Partly there', id: 'Hampir tepat');
   String get feedbackIncorrectLabel =>
-      isIndonesian ? 'Belum tepat' : 'Not yet';
-  String get misconceptionLabel =>
-      isIndonesian ? 'Ada miskonsepsi' : 'Misconception detected';
+      _t('feedbackIncorrectLabel', en: 'Not yet', id: 'Belum tepat');
+  String get misconceptionLabel => _t(
+    'misconceptionLabel',
+    en: 'Misconception detected',
+    id: 'Ada miskonsepsi',
+  );
 
   String masteryDeltaLabel(double delta) {
     final rounded = (delta * 100).abs().toStringAsFixed(0);
     if (delta > 0) {
-      return isIndonesian ? 'Penguasaan +$rounded%' : 'Mastery +$rounded%';
-    }
-    if (delta < 0) {
-      return isIndonesian ? 'Penguasaan -$rounded%' : 'Mastery -$rounded%';
-    }
-    return isIndonesian ? 'Penguasaan tetap' : 'Mastery unchanged';
-  }
-
-  String hintLevelLabel(int level) => isIndonesian
-      ? 'Tingkat bantuan $level'
-      : 'Hint level $level';
-
-  String get whyThisModuleLabel =>
-      isIndonesian ? 'Kenapa modul ini?' : 'Why this module?';
-
-  String get deleteSessionLabel => isIndonesian ? 'Hapus sesi' : 'Delete session';
-
-  String get deleteSessionConfirmBody => isIndonesian
-      ? 'Sesi chat ini akan dihapus permanen. Lanjutkan?'
-      : 'This chat session will be permanently deleted. Continue?';
-
-  factory _LocalizedWorkspaceMaterial.forLanguage(String languageCode) {
-    if (languageCode == 'id') {
-      return const _LocalizedWorkspaceMaterial(
-        isIndonesian: true,
-        topicTitle: 'Topik pembelajaran',
-        startChatTitle: 'Mulai sesi belajar',
-        startChatBody:
-            'Tutor akan memandu dari diagnosis dan fase belajar yang tersimpan di backend.',
-        startChatButtonLabel: 'Mulai chat belajar',
-        loadingDescription:
-            'Menghubungkan modul dengan konteks belajar dari backend.',
-        syncedDescription:
-            'Percakapan, kanvas, media, dan status fase disinkronkan dengan backend.',
+      return _tf(
+        'masteryDeltaUpLabel',
+        en: 'Mastery +$rounded%',
+        id: 'Penguasaan +$rounded%',
+        args: [rounded],
       );
     }
-
-    return const _LocalizedWorkspaceMaterial(
-      isIndonesian: false,
-      topicTitle: 'Learning topic',
-      startChatTitle: 'Start learning',
-      startChatBody:
-          'The tutor will guide you from the diagnosis and learning phase stored by the backend.',
-      startChatButtonLabel: 'Start learning chat',
-      loadingDescription:
-          'Connecting this module to the backend learning context.',
-      syncedDescription:
-          'Conversation, canvas, media, and phase state are synced with the backend.',
+    if (delta < 0) {
+      return _tf(
+        'masteryDeltaDownLabel',
+        en: 'Mastery -$rounded%',
+        id: 'Penguasaan -$rounded%',
+        args: [rounded],
+      );
+    }
+    return _t(
+      'masteryDeltaFlatLabel',
+      en: 'Mastery unchanged',
+      id: 'Penguasaan tetap',
     );
   }
+
+  String hintLevelLabel(int level) => _tf(
+    'hintLevelLabel',
+    en: 'Hint level $level',
+    id: 'Tingkat bantuan $level',
+    args: [level],
+  );
+
+  String get whyThisModuleLabel => _t(
+    'whyThisModuleLabel',
+    en: 'Why this module?',
+    id: 'Kenapa modul ini?',
+  );
+
+  String get deleteSessionLabel =>
+      _t('deleteSessionLabel', en: 'Delete session', id: 'Hapus sesi');
+
+  String get collapseLabel =>
+      _t('collapseLabel', en: 'Collapse', id: 'Ringkas');
+
+  String get detailsLabel => _t('detailsLabel', en: 'Details', id: 'Detail');
+
+  String finalTargetLabel(String target) => _tf(
+    'finalTargetLabel',
+    en: 'Final target: $target',
+    id: 'Target akhir: $target',
+    args: [target],
+  );
+
+  String get phaseTransitionReadyLabel => _t(
+    'phaseTransitionReadyLabel',
+    en: 'Phase transition ready',
+    id: 'Siap transisi fase',
+  );
+
+  String get continueThisPhaseLabel => _t(
+    'continueThisPhaseLabel',
+    en: 'Continue this phase',
+    id: 'Belajar di fase ini',
+  );
+
+  String get deleteSessionConfirmBody => _t(
+    'deleteSessionConfirmBody',
+    en: 'This chat session will be permanently deleted. Continue?',
+    id: 'Sesi chat ini akan dihapus permanen. Lanjutkan?',
+  );
 }
 
 class _WorkspaceChatPanel extends StatelessWidget {
@@ -1860,17 +2065,14 @@ class _WorkspaceChatPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          SpeechStatusBanner(locale: material.isIndonesian ? 'id-ID' : 'en-US'),
+          SpeechStatusBanner(locale: material.speechLocale),
           if (tutorDegraded) ...[
             const SizedBox(height: 10),
             _TutorOfflineBanner(material: material),
           ],
           if (learningContext?.hasDiagnosis ?? false) ...[
             const SizedBox(height: 10),
-            _LearningContextCard(
-              context: learningContext!,
-              material: material,
-            ),
+            _LearningContextCard(context: learningContext!, material: material),
           ],
           // ── Weekly report card (dismissible, shown at top of chat) ────────
           if (weeklyReport != null) ...[
@@ -1945,7 +2147,7 @@ class _WorkspaceChatPanel extends StatelessWidget {
                     _WorkspaceBubble(
                       text: entry.text!,
                       isUser: true,
-                      locale: material.isIndonesian ? 'id-ID' : 'en-US',
+                      locale: material.speechLocale,
                     ),
                   ],
                 ),
@@ -1958,7 +2160,7 @@ class _WorkspaceChatPanel extends StatelessWidget {
                     _WorkspaceBubble(
                       text: entry.text!,
                       isUser: false,
-                      locale: material.isIndonesian ? 'id-ID' : 'en-US',
+                      locale: material.speechLocale,
                     ),
                     if (entry.isDegraded) ...[
                       const SizedBox(height: 6),
@@ -2312,9 +2514,7 @@ class _LearningContextCard extends StatelessWidget {
             if (showTarget) ...[
               const SizedBox(height: 6),
               Text(
-                material.isIndonesian
-                    ? 'Target akhir: $target'
-                    : 'Final target: $target',
+                material.finalTargetLabel(target),
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: WicaraColors.ink.withValues(alpha: 0.65),
                 ),
@@ -3940,12 +4140,8 @@ class _WorkspaceCompactHeaderStatus extends StatelessWidget {
         ? WicaraColors.secondaryLight
         : WicaraColors.line;
     final statusText = phaseTransitionPending
-        ? (material.isIndonesian
-              ? 'Siap transisi fase'
-              : 'Phase transition ready')
-        : (material.isIndonesian
-              ? 'Belajar di fase ini'
-              : 'Continue this phase');
+        ? material.phaseTransitionReadyLabel
+        : material.continueThisPhaseLabel;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
       decoration: BoxDecoration(
@@ -4197,7 +4393,7 @@ class _WorkspaceComposerInput extends StatelessWidget {
         Align(
           alignment: Alignment.centerLeft,
           child: MicrophoneToggle(
-            locale: copy.isIndonesian ? 'id-ID' : 'en-US',
+            locale: copy.speechLocale,
             onTranscript: _insertTranscript,
           ),
         ),
@@ -4314,6 +4510,7 @@ class _WeeklyReportChatCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final copy = WicaraCopyScope.of(context);
     final score = report.score;
     final fixed = report.fixedGaps;
     final remaining = report.remainingGaps;
@@ -4362,7 +4559,7 @@ class _WeeklyReportChatCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Weekly Report',
+                      copy.weeklyReportLabel,
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w800,
@@ -4401,19 +4598,19 @@ class _WeeklyReportChatCard extends StatelessWidget {
             children: [
               _ReportStat(
                 value: score > 0 ? '$score%' : '--',
-                label: 'Score',
+                label: copy.scoreLabel,
                 color: WicaraColors.primary,
               ),
               const SizedBox(width: 8),
               _ReportStat(
                 value: '+$fixed',
-                label: 'Fixed gaps',
+                label: copy.fixedGapsLabel,
                 color: WicaraColors.accentMint,
               ),
               const SizedBox(width: 8),
               _ReportStat(
                 value: '$remaining',
-                label: 'Remaining',
+                label: copy.remainingLabel,
                 color: remaining > 0
                     ? const Color(0xFFF4A44E)
                     : WicaraColors.accentMint,
@@ -4421,7 +4618,7 @@ class _WeeklyReportChatCard extends StatelessWidget {
               const SizedBox(width: 8),
               _ReportStat(
                 value: '${minutes}m',
-                label: 'Retention',
+                label: copy.retentionLabel,
                 color: WicaraColors.primaryDeep,
               ),
             ],

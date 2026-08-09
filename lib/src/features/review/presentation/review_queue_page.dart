@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/localization/wicara_copy_scope.dart';
 import '../../../core/theme/wicara_colors.dart';
+import '../../onboarding/domain/onboarding_copy.dart';
 import '../application/review_controller.dart';
 import '../domain/review_models.dart';
 import 'review_item_detail_page.dart';
@@ -66,16 +68,17 @@ class _ReviewQueuePageState extends State<ReviewQueuePage> {
 
   @override
   Widget build(BuildContext context) {
+    final copy = WicaraCopyScope.of(context);
     return Scaffold(
       backgroundColor: WicaraColors.pageBackground,
       appBar: AppBar(
-        title: const Text('Teacher review'),
+        title: Text(copy.teacherReviewLabel),
         backgroundColor: Colors.white,
         foregroundColor: WicaraColors.ink,
         elevation: 0,
         actions: [
           IconButton(
-            tooltip: 'Correction metrics',
+            tooltip: copy.correctionMetricsLabel,
             icon: const Icon(Icons.insights_outlined),
             onPressed: _openMetrics,
           ),
@@ -86,8 +89,8 @@ class _ReviewQueuePageState extends State<ReviewQueuePage> {
         builder: (context, _) {
           return Column(
             children: [
-              _filters(),
-              Expanded(child: _list()),
+              _filters(copy),
+              Expanded(child: _list(copy)),
             ],
           );
         },
@@ -95,7 +98,7 @@ class _ReviewQueuePageState extends State<ReviewQueuePage> {
     );
   }
 
-  Widget _filters() {
+  Widget _filters(OnboardingCopy copy) {
     return Container(
       color: Colors.white,
       padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
@@ -103,20 +106,23 @@ class _ReviewQueuePageState extends State<ReviewQueuePage> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           _filterRow(
-            'Status',
+            copy,
+            copy.statusLabel,
             _statuses,
             _controller.statusFilter,
             (v) => _controller.setStatusFilter(v ?? 'open'),
             allowNull: false,
           ),
           _filterRow(
-            'Type',
+            copy,
+            copy.typeLabel,
             _types,
             _controller.typeFilter,
             _controller.setTypeFilter,
           ),
           _filterRow(
-            'Trigger',
+            copy,
+            copy.triggerLabel,
             _triggers,
             _controller.triggerFilter,
             _controller.setTriggerFilter,
@@ -127,6 +133,7 @@ class _ReviewQueuePageState extends State<ReviewQueuePage> {
   }
 
   Widget _filterRow(
+    OnboardingCopy copy,
     String label,
     List<String?> values,
     String? selected,
@@ -158,7 +165,9 @@ class _ReviewQueuePageState extends State<ReviewQueuePage> {
               runSpacing: 6,
               children: values.map((value) {
                 final isSelected = selected == value;
-                final text = value == null ? 'all' : reviewLabel(value);
+                final text = value == null
+                    ? copy.allFilterLabel
+                    : copy.reviewArtifactLabel(value);
                 return ChoiceChip(
                   label: Text(text),
                   selected: isSelected,
@@ -183,23 +192,25 @@ class _ReviewQueuePageState extends State<ReviewQueuePage> {
     );
   }
 
-  Widget _list() {
+  Widget _list(OnboardingCopy copy) {
     if (_controller.isLoadingQueue && _controller.items.isEmpty) {
       return const Center(child: CircularProgressIndicator());
     }
     if (_controller.queueError != null && _controller.items.isEmpty) {
       return _message(
+        copy: copy,
         icon: Icons.error_outline,
-        title: 'Could not load the queue',
+        title: copy.couldNotLoadQueueLabel,
         subtitle: _controller.queueError!,
         onRetry: _controller.loadQueue,
       );
     }
     if (_controller.items.isEmpty) {
       return _message(
+        copy: copy,
         icon: Icons.verified_outlined,
-        title: 'Nothing to review',
-        subtitle: 'No AI outputs match these filters right now.',
+        title: copy.nothingToReviewLabel,
+        subtitle: copy.noAiOutputsMatchFiltersLabel,
         onRetry: _controller.loadQueue,
       );
     }
@@ -209,12 +220,12 @@ class _ReviewQueuePageState extends State<ReviewQueuePage> {
         padding: const EdgeInsets.fromLTRB(12, 12, 12, 24),
         itemCount: _controller.items.length,
         itemBuilder: (context, index) =>
-            _itemCard(_controller.items[index]),
+            _itemCard(copy, _controller.items[index]),
       ),
     );
   }
 
-  Widget _itemCard(ReviewItem item) {
+  Widget _itemCard(OnboardingCopy copy, ReviewItem item) {
     return Card(
       margin: const EdgeInsets.only(bottom: 10),
       elevation: 0,
@@ -243,7 +254,7 @@ class _ReviewQueuePageState extends State<ReviewQueuePage> {
               ),
               const SizedBox(height: 10),
               Text(
-                item.summary.isEmpty ? '(no summary)' : item.summary,
+                item.summary.isEmpty ? copy.noSummaryLabel : item.summary,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: const TextStyle(
@@ -270,6 +281,7 @@ class _ReviewQueuePageState extends State<ReviewQueuePage> {
   }
 
   Widget _message({
+    required OnboardingCopy copy,
     required IconData icon,
     required String title,
     required String subtitle,
@@ -301,7 +313,7 @@ class _ReviewQueuePageState extends State<ReviewQueuePage> {
             OutlinedButton.icon(
               onPressed: () => onRetry(),
               icon: const Icon(Icons.refresh),
-              label: const Text('Refresh'),
+              label: Text(copy.refreshLabel),
             ),
           ],
         ),

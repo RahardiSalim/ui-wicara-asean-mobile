@@ -4,6 +4,8 @@ import 'package:flutter/material.dart';
 
 import '../core/accessibility/speech_accessibility_scope.dart';
 import '../core/accessibility/speech_controller.dart';
+import '../core/localization/app_language.dart';
+import '../core/localization/wicara_copy_scope.dart';
 import '../core/theme/wicara_theme.dart';
 import '../features/auth/application/auth_controller.dart';
 import '../features/auth/presentation/sign_in_page.dart';
@@ -16,6 +18,7 @@ import '../features/landing/presentation/landing_page.dart';
 import '../features/learning_goal/domain/learning_goal_repository.dart';
 import '../features/learning_goal/presentation/learning_goal_page.dart';
 import '../features/onboarding/application/onboarding_controller.dart';
+import '../features/onboarding/domain/onboarding_copy.dart';
 import '../features/onboarding/domain/onboarding_repository.dart';
 import '../features/onboarding/presentation/onboarding_page.dart';
 import '../features/pretest/domain/pretest_repository.dart';
@@ -90,6 +93,8 @@ class _WicaraAppState extends State<WicaraApp> with WidgetsBindingObserver {
       () => _speechController?.handleRouteChange(),
     );
     widget.authController.addListener(_onAuthChanged);
+    widget.onboardingController.addListener(_syncAppLanguage);
+    _syncAppLanguage();
     // If already initialized when the widget is created (uncommon but possible)
     if (widget.authController.isInitialized) {
       _resolvedInitialRoute = _computeInitialRoute();
@@ -100,7 +105,15 @@ class _WicaraAppState extends State<WicaraApp> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     widget.authController.removeListener(_onAuthChanged);
+    widget.onboardingController.removeListener(_syncAppLanguage);
     super.dispose();
+  }
+
+  /// Repositories, the HTTP client, and the offline pretest engine run outside
+  /// the widget tree, so they read the language from this mirror.
+  void _syncAppLanguage() {
+    AppLanguage.preferred =
+        widget.onboardingController.profile.preferredLanguage;
   }
 
   @override
@@ -158,13 +171,18 @@ class _WicaraAppState extends State<WicaraApp> with WidgetsBindingObserver {
     return AnimatedBuilder(
       animation: widget.onboardingController,
       builder: (context, _) {
-        return MaterialApp(
-          title: 'Wicara',
-          debugShowCheckedModeBanner: false,
-          theme: WicaraTheme.light(),
-          navigatorObservers: [_authRouteObserver, _speechRouteObserver],
-          initialRoute: initialRoute,
-          onGenerateRoute: _onGenerateRoute,
+        return WicaraCopyScope(
+          copy: OnboardingCopy.forLanguage(
+            widget.onboardingController.profile.preferredLanguage,
+          ),
+          child: MaterialApp(
+            title: 'Wicara',
+            debugShowCheckedModeBanner: false,
+            theme: WicaraTheme.light(),
+            navigatorObservers: [_authRouteObserver, _speechRouteObserver],
+            initialRoute: initialRoute,
+            onGenerateRoute: _onGenerateRoute,
+          ),
         );
       },
     );

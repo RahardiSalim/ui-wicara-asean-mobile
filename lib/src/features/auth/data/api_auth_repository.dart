@@ -4,6 +4,7 @@ import 'package:google_sign_in/google_sign_in.dart';
 import '../../../core/network/api_client.dart';
 import '../domain/auth_repository.dart';
 import 'auth_session_store.dart';
+import '../../../core/localization/app_language.dart';
 
 class ApiAuthRepository implements AuthRepository {
   ApiAuthRepository({
@@ -59,7 +60,7 @@ class ApiAuthRepository implements AuthRepository {
     } on ApiClientException catch (error) {
       throw AuthException(error.message);
     } catch (error) {
-      throw AuthException('Sign-in failed: $error');
+      throw AuthException(AppLanguage.copy.signInFailedLabel(error));
     }
   }
 
@@ -86,7 +87,7 @@ class ApiAuthRepository implements AuthRepository {
     } on ApiClientException catch (error) {
       throw AuthException(error.message);
     } catch (error) {
-      throw AuthException('Registration failed: $error');
+      throw AuthException(AppLanguage.copy.registrationFailedLabel(error));
     }
   }
 
@@ -101,7 +102,7 @@ class ApiAuthRepository implements AuthRepository {
       }
       final account = await googleSignIn.signIn();
       if (account == null) {
-        throw const AuthException('Google sign-in was cancelled.');
+        throw AuthException(AppLanguage.copy.googleSignInCancelledLabel);
       }
       return await _exchangeGoogleAccount(account, role);
     } on AuthException {
@@ -109,7 +110,7 @@ class ApiAuthRepository implements AuthRepository {
     } on ApiClientException catch (error) {
       throw AuthException(error.message);
     } catch (error) {
-      throw AuthException('Google sign-in failed: $error');
+      throw AuthException(AppLanguage.copy.googleSignInFailedLabel(error));
     }
   }
 
@@ -144,7 +145,7 @@ class ApiAuthRepository implements AuthRepository {
     } on ApiClientException catch (error) {
       throw AuthException(error.message);
     } catch (error) {
-      throw AuthException('Google sign-in failed: $error');
+      throw AuthException(AppLanguage.copy.googleSignInFailedLabel(error));
     }
   }
 
@@ -186,7 +187,7 @@ class ApiAuthRepository implements AuthRepository {
     } on ApiClientException catch (error) {
       throw AuthException(error.message);
     } catch (error) {
-      throw AuthException('Google sign-in failed: $error');
+      throw AuthException(AppLanguage.copy.googleSignInFailedLabel(error));
     }
   }
 

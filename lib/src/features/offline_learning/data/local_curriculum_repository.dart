@@ -7,6 +7,8 @@ import 'package:sqflite/sqflite.dart';
 import '../../curriculum/domain/curriculum_models.dart';
 import '../../curriculum/domain/curriculum_repository.dart';
 import 'local_wicara_database.dart';
+import '../../onboarding/domain/onboarding_copy.dart';
+import '../../../core/localization/app_language.dart';
 
 class LocalConceptRecord {
   const LocalConceptRecord({
@@ -344,8 +346,8 @@ ORDER BY subject_code ASC
       concepts = await listConcepts();
     }
     if (concepts.isEmpty) {
-      return const CurriculumKnowledgeMap(
-        title: 'Knowledge Map',
+      return CurriculumKnowledgeMap(
+        title: OnboardingCopy.forLanguage(locale).knowledgeMapLabel,
         width: 1280,
         height: 720,
         topDown: false,
@@ -398,7 +400,7 @@ ORDER BY subject_code ASC
     for (var depth = 0; depth <= layout.maxDepth; depth++) {
       groups.add(
         CurriculumKnowledgeGroup(
-          label: 'Layer ${depth + 1}',
+          label: OnboardingCopy.forLanguage(locale).layerLabel(depth + 1),
           x: 40 + depth * 300,
         ),
       );
@@ -430,7 +432,7 @@ ORDER BY subject_code ASC
   }) async {
     final allConcepts = await listConcepts(subjectCode: subject);
     if (allConcepts.isEmpty) {
-      throw const FormatException('Konsep tidak ditemukan di kurikulum lokal.');
+      throw FormatException(AppLanguage.copy.conceptNotFoundLabel);
     }
     final conceptByCode = <String, LocalConceptRecord>{
       for (final concept in allConcepts) concept.code: concept,
@@ -438,7 +440,7 @@ ORDER BY subject_code ASC
     final concept = conceptByCode[conceptCode];
     if (concept == null) {
       throw FormatException(
-        'Konsep "$conceptCode" tidak ditemukan di kurikulum lokal.',
+        AppLanguage.copy.conceptCodeNotFoundLabel(conceptCode),
       );
     }
     final conceptById = <String, LocalConceptRecord>{

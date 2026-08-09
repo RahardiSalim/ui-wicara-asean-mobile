@@ -16,6 +16,8 @@ import '../../pretest/domain/pretest_models.dart';
 import '../../pretest/domain/pretest_repository.dart';
 import '../../pretest/data/api_pretest_repository.dart';
 import '../../pretest/data/pretest_session_store.dart';
+import '../../../core/localization/app_language.dart';
+import '../../onboarding/domain/onboarding_copy.dart';
 
 class LocalDiagnosisGenerationProgress {
   const LocalDiagnosisGenerationProgress({
@@ -76,6 +78,9 @@ class LocalPretestEngine {
 
   final LocalWicaraDatabase _database;
   final PretestSessionStore _pretestSessionStore;
+
+  /// Copy for the learner's language; the engine runs outside the widget tree.
+  OnboardingCopy get _copy => AppLanguage.copy;
   final LocalCurriculumRepository _localCurriculum;
   final LocalMasteryRepository _localMastery;
   final LocalSessionRepository _localSessions;
@@ -144,7 +149,7 @@ class LocalPretestEngine {
 
   Future<KnowledgeState> selectPath(String pathOption) async {
     if (pathOption.trim().isEmpty) {
-      throw const PretestException('Path option tidak boleh kosong.');
+      throw PretestException(_copy.emptyPathOptionLabel);
     }
     if (_latestDiagnosis != null) {
       final diagnosis = <String, dynamic>{
@@ -164,17 +169,13 @@ class LocalPretestEngine {
       return localKnowledgeState;
     }
     if (forceLocalForPilot) {
-      throw const PretestException(
-        'Diagnosis lokal belum tersedia. Selesaikan pretest terlebih dahulu.',
-      );
+      throw PretestException(_copy.localDiagnosisUnavailableLabel);
     }
     if (_backendRepository != null) {
       final backend = _backendRepository;
       return backend.selectPath(pathOption.trim());
     }
-    throw const PretestException(
-      'Diagnosis lokal belum tersedia. Selesaikan pretest terlebih dahulu.',
-    );
+    throw PretestException(_copy.localDiagnosisUnavailableLabel);
   }
 
   bool get _canUseLocal => _database.isPlatformSupported;
@@ -184,7 +185,7 @@ class LocalPretestEngine {
     final metadata = _sessionMetadata(active.metadata);
     final state = _map(metadata['decision_state']);
     if (state.isEmpty) {
-      throw const PretestException('State pretest lokal tidak valid.');
+      throw PretestException(_copy.localPretestStateInvalidLabel);
     }
     final graphScope = _map(metadata['graph_scope']);
     final generatedPackCountBefore = _generatedPackCount(state);
@@ -209,14 +210,14 @@ class LocalPretestEngine {
 
   Future<PretestAnswerResult> _submitAnswerLocal(PretestAnswer answer) async {
     if (answer.optionId.trim().isEmpty) {
-      throw const PretestException('Choose an answer before continuing.');
+      throw PretestException(_copy.chooseAnswerFirstLabel);
     }
     final active = await _requireActiveLocalSession();
     final metadata = _sessionMetadata(active.metadata);
     final state = _map(metadata['decision_state']);
     final graphScope = _map(metadata['graph_scope']);
     if (state.isEmpty || graphScope.isEmpty) {
-      throw const PretestException('Session pretest lokal tidak valid.');
+      throw PretestException(_copy.localPretestSessionInvalidLabel);
     }
 
     final question = await _questionFromState(
@@ -224,15 +225,11 @@ class LocalPretestEngine {
       graphScope: graphScope,
     );
     if (answer.questionId.trim() != question.id) {
-      throw const PretestException(
-        'Question mismatch. Muat ulang pretest dan coba lagi.',
-      );
+      throw PretestException(_copy.questionMismatchLabel);
     }
     final selectedOption = question.options.firstWhere(
       (option) => option.id == answer.optionId,
-      orElse: () => throw const PretestException(
-        'Selected option was not found for this question.',
-      ),
+      orElse: () => throw PretestException(_copy.optionNotFoundLabel),
     );
 
     final knownConceptCodes =
@@ -759,7 +756,7 @@ class LocalPretestEngine {
         active: true,
         sessionId: sessionId,
         status: 'running',
-        message: 'AI sedang menulis catatan personal...',
+        message: _copy.offlineWritingNotesLabel,
       ),
     );
     unawaited(
@@ -784,7 +781,7 @@ class LocalPretestEngine {
             active: false,
             sessionId: sessionId,
             status: 'failed',
-            message: 'Session pretest tidak ditemukan.',
+            message: _copy.offlineSessionNotFoundLabel,
           ),
         );
         return;
@@ -798,7 +795,7 @@ class LocalPretestEngine {
             active: false,
             sessionId: sessionId,
             status: 'failed',
-            message: 'State pretest tidak valid.',
+            message: _copy.offlineInvalidStateLabel,
           ),
         );
         return;
@@ -838,7 +835,7 @@ class LocalPretestEngine {
           active: false,
           sessionId: sessionId,
           status: 'completed',
-          message: 'Catatan personal AI selesai.',
+          message: _copy.offlineNotesReadyLabel,
           knowledgeState: knowledgeStateFromDiagnosis(enriched),
         ),
       );
@@ -848,7 +845,7 @@ class LocalPretestEngine {
           active: false,
           sessionId: sessionId,
           status: 'failed',
-          message: 'AI belum bisa menulis catatan personal untuk sesi ini.',
+          message: _copy.offlineNotesFailedLabel,
         ),
       );
     }
@@ -1046,9 +1043,7 @@ class LocalPretestEngine {
       concepts = await _localCurriculum.listConcepts(subjectCode: 'matematika');
     }
     if (concepts.isEmpty) {
-      throw const PretestException(
-        'Offline curriculum belum tersedia di device.',
-      );
+      throw PretestException(_copy.offlineCurriculumMissingLabel);
     }
     final edges = await _localCurriculum.listEdges();
     final target = _resolveTargetConcept(
@@ -1112,15 +1107,11 @@ class LocalPretestEngine {
     };
     final targetCode = _string(preferredConceptCode);
     if (targetCode.isEmpty) {
-      throw const PretestException(
-        'Target concept belum dipilih. Buka Learning Goal dan pilih node target dulu.',
-      );
+      throw PretestException(_copy.targetConceptNotChosenLabel);
     }
     final concept = byCode[targetCode];
     if (concept == null) {
-      throw PretestException(
-        'Target concept "$targetCode" tidak ditemukan di kurikulum lokal.',
-      );
+      throw PretestException(_copy.targetConceptNotFoundLabel(targetCode));
     }
     return _TargetConcept(
       id: concept.id,
@@ -1212,7 +1203,7 @@ class LocalPretestEngine {
       prompt: item.prompt,
       helper: item.helper.isNotEmpty
           ? item.helper
-          : 'Pilih jawaban yang paling tepat untuk $conceptTitle.',
+          : _copy.chooseBestAnswerLabel(conceptTitle),
       expectedReasoning: item.explanation,
       options: options,
       progressCurrent: progressCurrent,
@@ -1241,6 +1232,7 @@ class LocalPretestEngine {
 
     await _ensureRuntimeReadyOrThrow(conceptCode: conceptCode);
     final generated = await _questionGenerator.generatePack(
+      language: AppLanguage.preferred,
       conceptCode: conceptCode,
       conceptTitle: conceptTitle,
       conceptDescription: conceptDescription,
@@ -1361,7 +1353,7 @@ class LocalPretestEngine {
       correctOption: correctOption,
       options: options,
       explanation: explanation.isEmpty
-          ? 'Tinjau langkah pengerjaan untuk memastikan pilihan jawaban.'
+          ? _copy.reviewWorkingStepsLabel
           : explanation,
       helper: helper,
     );
@@ -1402,9 +1394,7 @@ class LocalPretestEngine {
   Future<PretestQuestion> _fetchBackendQuestionOrThrow() async {
     final backend = _backendRepository;
     if (backend == null) {
-      throw const PretestException(
-        'Backend pretest repository belum dikonfigurasi.',
-      );
+      throw PretestException(_copy.backendPretestNotConfiguredLabel);
     }
     return backend.fetchCurrentQuestion();
   }
@@ -1414,9 +1404,7 @@ class LocalPretestEngine {
   ) async {
     final backend = _backendRepository;
     if (backend == null) {
-      throw const PretestException(
-        'Backend pretest repository belum dikonfigurasi.',
-      );
+      throw PretestException(_copy.backendPretestNotConfiguredLabel);
     }
     return backend.submitAnswer(answer);
   }

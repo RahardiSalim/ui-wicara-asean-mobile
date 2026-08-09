@@ -4,6 +4,7 @@ import '../../edge_ai/data/litert_gemma_runtime.dart';
 import '../../edge_ai/domain/edge_ai_models.dart';
 import '../../edge_ai/domain/edge_ai_runtime.dart';
 import 'local_pretest_models.dart';
+import '../../../core/localization/app_language.dart';
 
 class LocalEvidenceEvaluator {
   const LocalEvidenceEvaluator({this.runtime = defaultEdgeAiRuntime});
@@ -193,8 +194,7 @@ class LocalEvidenceEvaluator {
       return _ReasoningResult(
         reasoningScore: score,
         reasoningSignal: score >= 0.75 ? 'valid_reasoning' : 'thin_reasoning',
-        feedback:
-            'Reasoning dinilai dengan heuristic lokal karena evaluasi LiteRT belum tersedia.',
+        feedback: AppLanguage.copy.heuristicReasoningFeedback,
         source: 'heuristic',
         prerequisiteGapCandidate: null,
       );
@@ -204,29 +204,27 @@ class LocalEvidenceEvaluator {
     final expectedTerms = _terms(expectedReasoning);
     final overlap = userTerms.intersection(expectedTerms).length;
     if (overlap >= 2 || wordCount >= 8) {
-      return const _ReasoningResult(
+      return _ReasoningResult(
         reasoningScore: 0.78,
         reasoningSignal: 'possible_careless_mistake',
-        feedback:
-            'MCQ salah, tapi ada sinyal penalaran parsial yang cukup kuat.',
+        feedback: AppLanguage.copy.carelessMistakeFeedback,
         source: 'heuristic',
         prerequisiteGapCandidate: null,
       );
     }
     if (overlap == 1) {
-      return const _ReasoningResult(
+      return _ReasoningResult(
         reasoningScore: 0.45,
         reasoningSignal: 'partial_reasoning',
-        feedback:
-            'Penalaran parsial, tetapi belum cukup untuk mendukung jawaban.',
+        feedback: AppLanguage.copy.partialReasoningFeedback,
         source: 'heuristic',
         prerequisiteGapCandidate: null,
       );
     }
-    return const _ReasoningResult(
+    return _ReasoningResult(
       reasoningScore: 0.2,
       reasoningSignal: 'unrelated',
-      feedback: 'Penalaran belum terkait langsung dengan konsep inti soal.',
+      feedback: AppLanguage.copy.unrelatedReasoningFeedback,
       source: 'heuristic',
       prerequisiteGapCandidate: null,
     );
