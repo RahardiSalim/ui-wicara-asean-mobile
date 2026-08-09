@@ -1,5 +1,6 @@
 enum AuthRole {
-  learner('Learner');
+  learner('Student'),
+  teacher('Teacher');
 
   const AuthRole(this.label);
 
@@ -91,6 +92,10 @@ abstract class AuthRepository {
   });
 
   Stream<AuthSession> googleSignInSessions({required AuthRole role});
+
+  Future<void> requestPasswordReset(String email) async {
+    throw const AuthException('Password reset is not supported.');
+  }
 
   /// Exchange refresh_token for a fresh access_token.
   /// Returns null if refresh_token is invalid/expired (caller should sign out).

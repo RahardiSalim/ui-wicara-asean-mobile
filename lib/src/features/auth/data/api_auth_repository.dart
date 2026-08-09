@@ -46,7 +46,6 @@ class ApiAuthRepository implements AuthRepository {
         body: {
           'email_or_phone': request.emailOrPhone.trim(),
           'password': request.password,
-          'role': request.role.name,
         },
       );
       final session = _toAuthSession(json, request.role);
@@ -88,6 +87,18 @@ class ApiAuthRepository implements AuthRepository {
       throw AuthException(error.message);
     } catch (error) {
       throw AuthException(AppLanguage.copy.registrationFailedLabel(error));
+    }
+  }
+
+  @override
+  Future<void> requestPasswordReset(String email) async {
+    try {
+      await _apiClient.postJson(
+        '/api/v1/auth/password-reset',
+        body: {'email': email.trim()},
+      );
+    } on ApiClientException catch (error) {
+      throw AuthException(error.message);
     }
   }
 
@@ -165,7 +176,7 @@ class ApiAuthRepository implements AuthRepository {
         throw const AuthException('Google did not return accessToken.');
       }
 
-      final body = <String, String>{'id_token': idToken, 'role': role.name};
+      final body = <String, String>{'id_token': idToken};
       if (accessToken != null && accessToken.isNotEmpty) {
         body['access_token'] = accessToken;
       }
@@ -221,11 +232,16 @@ class ApiAuthRepository implements AuthRepository {
   AuthSession _toAuthSession(Map<String, dynamic> json, AuthRole role) {
     final token = (json['token'] ?? '').toString().trim();
     final refresh = (json['refresh_token'] ?? '').toString().trim();
+    final backendRole = (json['role'] ?? '').toString().trim();
+    final resolvedRole = AuthRole.values.firstWhere(
+      (candidate) => candidate.name == backendRole,
+      orElse: () => AuthRole.learner,
+    );
 
     return AuthSession(
       userId: (json['user_id'] ?? '').toString(),
       displayName: (json['display_name'] ?? '').toString(),
-      role: role,
+      role: resolvedRole,
       onboardingCompleted: json['onboarding_completed'] == true,
       token: token.isEmpty ? null : token,
       refreshToken: refresh.isEmpty ? null : refresh,

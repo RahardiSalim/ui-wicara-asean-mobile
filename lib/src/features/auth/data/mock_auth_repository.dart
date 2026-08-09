@@ -69,6 +69,19 @@ class MockAuthRepository implements AuthRepository {
   }
 
   @override
+  Future<void> requestPasswordReset(String email) async {
+    await Future<void>.delayed(delay);
+
+    final normalizedEmail = email.trim();
+    if (normalizedEmail.isEmpty) {
+      throw const AuthException('Please enter your email.');
+    }
+    if (!RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(normalizedEmail)) {
+      throw const AuthException('Enter a valid email address.');
+    }
+  }
+
+  @override
   Future<AuthSession?> refresh(AuthSession current) async {
     // Mock: always succeeds with same session (no real expiry in mock)
     return current;

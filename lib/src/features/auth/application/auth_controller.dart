@@ -141,6 +141,10 @@ class AuthController extends ChangeNotifier {
     return session;
   }
 
+  Future<void> requestPasswordReset(String email) {
+    return _authRepository.requestPasswordReset(email);
+  }
+
   Future<AuthSession> startDevelopmentSession({
     required AuthRole role,
     String? displayName,
