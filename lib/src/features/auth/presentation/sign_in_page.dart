@@ -339,6 +339,9 @@ class _SignInPageState extends State<SignInPage> {
     }
     setState(() {
       _mode = mode;
+      if (mode == _AuthMode.login) {
+        _role = AuthRole.learner;
+      }
       _formKey.currentState?.reset();
     });
   }
@@ -433,14 +436,16 @@ class _SignInPageState extends State<SignInPage> {
                                       selectedMode: _mode,
                                       onSelected: _selectMode,
                                     ),
-                                    const SizedBox(height: 22),
-                                    _RoleSelector(
-                                      selectedRole: _role,
-                                      enabled: !_isSubmitting,
-                                      onSelected: (role) {
-                                        setState(() => _role = role);
-                                      },
-                                    ),
+                                    if (_mode == _AuthMode.register) ...[
+                                      const SizedBox(height: 22),
+                                      _RoleSelector(
+                                        selectedRole: _role,
+                                        enabled: !_isSubmitting,
+                                        onSelected: (role) {
+                                          setState(() => _role = role);
+                                        },
+                                      ),
+                                    ],
                                     const SizedBox(height: 30),
                                     Form(
                                       key: _formKey,

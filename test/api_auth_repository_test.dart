@@ -96,7 +96,6 @@ void main() {
       expect(jsonDecode(capturedRequest.body), {
         'email_or_phone': 'new.user@example.com',
         'password': 'secret-password',
-        'role': 'teacher',
       });
       expect(session.userId, 'new-user-1');
       expect(session.displayName, 'New User');

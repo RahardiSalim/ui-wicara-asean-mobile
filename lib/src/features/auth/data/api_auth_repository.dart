@@ -46,7 +46,6 @@ class ApiAuthRepository implements AuthRepository {
         body: {
           'email_or_phone': request.emailOrPhone.trim(),
           'password': request.password,
-          'role': request.role.name,
         },
       );
       final session = _toAuthSession(json, request.role);
@@ -177,7 +176,7 @@ class ApiAuthRepository implements AuthRepository {
         throw const AuthException('Google did not return accessToken.');
       }
 
-      final body = <String, String>{'id_token': idToken, 'role': role.name};
+      final body = <String, String>{'id_token': idToken};
       if (accessToken != null && accessToken.isNotEmpty) {
         body['access_token'] = accessToken;
       }
