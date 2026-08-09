@@ -10,11 +10,13 @@ class TeacherDashboardPage extends StatefulWidget {
   const TeacherDashboardPage({
     required this.repository,
     this.reviewRepository,
+    this.onSignOut,
     super.key,
   });
 
   final TeacherStudentRepository repository;
   final ReviewRepository? reviewRepository;
+  final Future<void> Function()? onSignOut;
 
   @override
   State<TeacherDashboardPage> createState() => _TeacherDashboardPageState();
@@ -149,7 +151,7 @@ class _TeacherDashboardPageState extends State<TeacherDashboardPage> {
     return Scaffold(
       backgroundColor: WicaraColors.pageBackground,
       appBar: AppBar(
-        title: const Text('Student dashboard'),
+        title: const Text('Teacher dashboard'),
         backgroundColor: Colors.white,
         foregroundColor: WicaraColors.ink,
         actions: [
@@ -158,6 +160,12 @@ class _TeacherDashboardPageState extends State<TeacherDashboardPage> {
               tooltip: 'AI review queue',
               onPressed: _openReviewQueue,
               icon: const Icon(Icons.rate_review_outlined),
+            ),
+          if (widget.onSignOut != null)
+            IconButton(
+              tooltip: 'Sign out',
+              onPressed: widget.onSignOut,
+              icon: const Icon(Icons.logout_rounded),
             ),
         ],
       ),

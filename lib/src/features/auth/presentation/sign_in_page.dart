@@ -328,7 +328,9 @@ class _SignInPageState extends State<SignInPage> {
 
   void _openNextRoute(AuthSession session) {
     Navigator.of(context).pushNamedAndRemoveUntil(
-      session.onboardingCompleted ? AppRoutes.home : AppRoutes.onboarding,
+      session.role == AuthRole.teacher || session.onboardingCompleted
+          ? AppRoutes.home
+          : AppRoutes.onboarding,
       (route) => false,
     );
   }

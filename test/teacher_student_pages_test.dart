@@ -41,6 +41,7 @@ void main() {
     );
     await tester.pumpAndSettle();
 
+    expect(find.text('Teacher dashboard'), findsOneWidget);
     expect(find.text('Student One'), findsOneWidget);
     expect(find.text('Connected'), findsWidgets);
 
@@ -56,6 +57,26 @@ void main() {
       const Offset(0, -300),
     );
     expect(find.text('Needs review (1)'), findsOneWidget);
+  });
+
+  testWidgets('teacher dashboard exposes sign out', (tester) async {
+    var signedOut = false;
+    final repository = _FakeTeacherStudentRepository(connections: const []);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: TeacherDashboardPage(
+          repository: repository,
+          onSignOut: () async => signedOut = true,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Sign out'));
+    await tester.pump();
+
+    expect(signedOut, isTrue);
   });
 }
 

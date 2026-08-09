@@ -36,6 +36,9 @@ class AuthController extends ChangeNotifier {
     if (session == null) {
       return AppRoutes.landing;
     }
+    if (session.role == AuthRole.teacher) {
+      return AppRoutes.home;
+    }
     if (!session.onboardingCompleted) {
       return AppRoutes.onboarding;
     }

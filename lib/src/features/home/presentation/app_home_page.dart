@@ -14,6 +14,7 @@ import '../../../core/widgets/gradient_button.dart';
 import '../../../core/widgets/language_chip.dart';
 import '../../../core/widgets/speech_controls.dart';
 import '../../auth/application/auth_controller.dart';
+import '../../auth/domain/auth_repository.dart';
 import '../../curriculum/domain/curriculum_models.dart';
 import '../../curriculum/domain/curriculum_repository.dart';
 import '../../learning_goal/domain/learning_goal_repository.dart';
@@ -222,6 +223,16 @@ class _AppHomePageState extends State<AppHomePage> {
         builder: (_) => StudentTeacherConnectionsPage(repository: repo),
       ),
     );
+  }
+
+  Future<void> _signOutTeacher() async {
+    await widget.authController.signOut();
+    if (!mounted) {
+      return;
+    }
+    Navigator.of(
+      context,
+    ).pushNamedAndRemoveUntil(AppRoutes.landing, (route) => false);
   }
 
   Widget? _homeFab() {
@@ -968,6 +979,16 @@ class _AppHomePageState extends State<AppHomePage> {
 
   @override
   Widget build(BuildContext context) {
+    final teacherStudentRepository = widget.teacherStudentRepository;
+    if (widget.authController.session?.role == AuthRole.teacher &&
+        teacherStudentRepository != null) {
+      return TeacherDashboardPage(
+        repository: teacherStudentRepository,
+        reviewRepository: widget.reviewRepository,
+        onSignOut: _signOutTeacher,
+      );
+    }
+
     return AnimatedBuilder(
       animation: widget.onboardingController,
       builder: (context, _) {
@@ -976,7 +997,10 @@ class _AppHomePageState extends State<AppHomePage> {
         );
 
         return Scaffold(
-          floatingActionButton: _homeFab(),
+          floatingActionButton: Padding(
+            padding: const EdgeInsets.only(bottom: 78),
+            child: _homeFab(),
+          ),
           body: _HomeCopyScope(
             copy: copy,
             child: SafeArea(
