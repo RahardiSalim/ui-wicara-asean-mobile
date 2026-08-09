@@ -25,6 +25,7 @@ import '../features/pretest/domain/pretest_repository.dart';
 import '../features/pretest/presentation/pretest_page.dart';
 import '../features/analytics/domain/analytics_models.dart';
 import '../features/review/domain/review_models.dart';
+import '../features/teacher_students/domain/teacher_student_models.dart';
 import '../features/workspace/domain/workspace_models.dart';
 import '../features/workspace/domain/workspace_repository.dart';
 import '../features/workspace/presentation/workspace_modules_page.dart';
@@ -42,6 +43,7 @@ class WicaraApp extends StatefulWidget {
     this.homeRepository,
     this.reviewRepository,
     this.analyticsRepository,
+    this.teacherStudentRepository,
     this.initialRoute = AppRoutes.landing,
     super.key,
   });
@@ -56,6 +58,7 @@ class WicaraApp extends StatefulWidget {
   final WorkspaceRepository? workspaceRepository;
   final ReviewRepository? reviewRepository;
   final AnalyticsRepository? analyticsRepository;
+  final TeacherStudentRepository? teacherStudentRepository;
   final String initialRoute;
 
   @override
@@ -224,6 +227,7 @@ class _WicaraAppState extends State<WicaraApp> with WidgetsBindingObserver {
           onboardingController: widget.onboardingController,
           reviewRepository: widget.reviewRepository,
           analyticsRepository: widget.analyticsRepository,
+          teacherStudentRepository: widget.teacherStudentRepository,
           routeArguments: settings.arguments,
         ),
         AppRoutes.workspaceModules => WorkspaceModulesPage(
