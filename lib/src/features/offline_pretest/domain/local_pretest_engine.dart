@@ -52,9 +52,10 @@ class LocalPretestEngine {
     this.forceLocalForPilot = true,
     this.allowBackendFallback = false,
     this.maxDepth = 2,
-    this.maxQuestions = 3,
+    int maxQuestions = 10,
     this.maxNodesVisited = 5,
-  }) : _database = localDatabase,
+  }) : maxQuestions = maxQuestions.clamp(1, 10),
+       _database = localDatabase,
        _pretestSessionStore = pretestSessionStore,
        _localCurriculum =
            localCurriculumRepository ??
@@ -1171,11 +1172,6 @@ class LocalPretestEngine {
       conceptTitle: conceptTitle,
       conceptDescription: conceptDescription,
     );
-    final packQuestionCount = _packQuestionCount(generatedPack);
-    final effectiveProgressMax = packQuestionCount <= 0
-        ? progressMax
-        : packQuestionCount;
-    decisionState['max_questions'] = effectiveProgressMax;
     final item = _questionSeedForDifficulty(
       difficulty: difficulty,
       fallbackSeed: fallbackSeed,
@@ -1207,7 +1203,7 @@ class LocalPretestEngine {
       expectedReasoning: item.explanation,
       options: options,
       progressCurrent: progressCurrent,
-      progressMax: effectiveProgressMax,
+      progressMax: progressMax,
     );
   }
 
@@ -1362,19 +1358,6 @@ class LocalPretestEngine {
   int _generatedPackCount(Map<String, dynamic> decisionState) {
     final generatedPacks = _map(decisionState['generated_packs']);
     return generatedPacks.length;
-  }
-
-  int _packQuestionCount(Map<String, dynamic>? generatedPack) {
-    if (generatedPack == null || generatedPack.isEmpty) {
-      return 3;
-    }
-    var count = 0;
-    for (final difficulty in const <String>['easy', 'medium', 'hard']) {
-      if (_seedFromDynamic(generatedPack[difficulty]) != null) {
-        count += 1;
-      }
-    }
-    return count <= 0 ? 3 : count;
   }
 
   Future<T> _withFallback<T>(

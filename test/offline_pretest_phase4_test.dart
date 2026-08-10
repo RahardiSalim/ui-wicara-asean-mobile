@@ -79,6 +79,7 @@ void main() {
       );
 
       var question = await repository.fetchCurrentQuestion();
+      expect(question.progressMax, 10);
       PretestAnswerResult? answerResult;
       for (var i = 0; i < 12; i++) {
         answerResult = await repository.submitAnswer(
