@@ -167,10 +167,10 @@ class LocalPretestDecisionEngine {
       );
     }
     if (lastDifficulty == 'hard') {
-      return _askNextPrerequisite(
-        state,
-        graphScope: graphScope,
-        fallbackReason: 'prerequisite_strength_checked',
+      state['stop_reason'] = 'prerequisite_strength_checked';
+      return (
+        state: state,
+        action: {'type': 'finalize', 'reason': 'prerequisite_strength_checked'},
       );
     }
     if (lastDifficulty == 'easy') {
@@ -312,15 +312,8 @@ class LocalPretestDecisionEngine {
 
   Map<String, dynamic>? _limitAction(Map<String, dynamic> state) {
     if (_int(state['question_count']) >=
-        _int(state['max_questions'], fallback: 3)) {
+        _int(state['max_questions'], fallback: 10)) {
       return {'type': 'finalize', 'reason': 'max_questions_reached'};
-    }
-    if (_double(state['confidence']) >=
-        _double(state['confidence_threshold'], fallback: 0.95)) {
-      if (_string(state['current_concept_code']) !=
-          _string(state['target_concept_code'])) {
-        return {'type': 'finalize', 'reason': 'confidence_threshold_reached'};
-      }
     }
     return null;
   }

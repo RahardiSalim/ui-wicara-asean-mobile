@@ -34,7 +34,7 @@ class LocalPretestRepository implements PretestRepository {
     bool forceLocalForPilot = true,
     bool allowBackendFallback = false,
     int maxDepth = 2,
-    int maxQuestions = 3,
+    int maxQuestions = 10,
     int maxNodesVisited = 5,
   }) : _engine = LocalPretestEngine(
          localDatabase: localDatabase,
