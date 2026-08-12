@@ -294,7 +294,7 @@ void main() {
     await tester.pumpWidget(
       await _buildSignedInTestApp(
         homeRepository: const _WorkspaceReadyHomeRepository(),
-        workspaceRepository: const _FakeWorkspaceRepository(),
+        workspaceRepository: const _ExploreWorkspaceRepository(),
         educationLevel: 'elementary',
         gradeLevel: '4',
         speechController: speechController,
@@ -1280,6 +1280,31 @@ class _FakeWorkspaceRepository implements WorkspaceRepository {
         posttestSessionId: 'posttest-widget-test',
         questionCount: 10,
       ),
+    );
+  }
+}
+
+class _ExploreWorkspaceRepository extends _FakeWorkspaceRepository {
+  const _ExploreWorkspaceRepository();
+
+  @override
+  Future<WorkspaceSession> createOrResumeWorkspace({
+    required String trackId,
+    required String moduleId,
+    String? workspaceSessionId,
+    bool startNewSession = false,
+  }) async {
+    return WorkspaceSession(
+      id: workspaceSessionId ?? 'workspace-perkalian',
+      trackId: trackId,
+      moduleId: moduleId,
+      currentTopic: 'Perkalian',
+      contentMode: 'chat',
+      status: 'active',
+      events: const [],
+      currentPhase: 'explore',
+      phaseTransitionPending: false,
+      posttestEligible: false,
     );
   }
 }

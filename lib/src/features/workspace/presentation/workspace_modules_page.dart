@@ -188,10 +188,11 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
         _chatEntries
           ..clear()
           ..addAll(_entriesFromEvents(workspace.events));
-        _latestVideoArtifact = _withResolvedArtifactUrls(workspace.latestMedia);
+        _restoreLoadedVideoState(workspace);
         _sessionHistory = history;
         _isLoadingWorkspace = false;
       });
+      _resumePendingVideoPolling(workspace);
       _scrollToBottom();
     } on WorkspaceException catch (error) {
       if (!mounted || requestSerial != _workspaceRequestSerial) return;
@@ -247,10 +248,11 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
         _chatEntries
           ..clear()
           ..addAll(_entriesFromEvents(workspace.events));
-        _latestVideoArtifact = _withResolvedArtifactUrls(workspace.latestMedia);
+        _restoreLoadedVideoState(workspace);
         _sessionHistory = history;
         _isLoadingWorkspace = false;
       });
+      _resumePendingVideoPolling(workspace);
       _scrollToBottom();
     } on WorkspaceException catch (error) {
       if (!mounted || requestSerial != _workspaceRequestSerial) {
@@ -356,7 +358,7 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     });
   }
 
-  Future<void> _generateVideo() async {
+  Future<void> _generateVideo({WorkspaceToolSuggestion? suggestion}) async {
     if (_isVideoGenerating) {
       return;
     }
@@ -364,6 +366,12 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     if (workspace == null) {
       setState(() {
         _workspaceError = _workspaceMaterial.workspaceNotReadyMessage;
+      });
+      return;
+    }
+    if (!_canGenerateVideoForCurrentTopic()) {
+      setState(() {
+        _workspaceError = _workspaceMaterial.visualOnlyExploreMessage;
       });
       return;
     }
@@ -397,10 +405,16 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
         qualityProfile: 'standard',
         conceptId: workspace.learningContext.currentModuleConceptId,
         metadata: {
-          'triggered_by': 'workspace_mid_chat_button',
+          'triggered_by': suggestion == null
+              ? 'workspace_mid_chat_button'
+              : 'tutor_visual_suggestion',
           'chat_turn_count': chatTurnCount,
           'workspace_content_mode': _contentMode.name,
           'current_phase': workspace.currentPhase,
+          if (suggestion != null) ...{
+            'suggestion_reason': suggestion.reason,
+            'suggestion_prompt': suggestion.prompt,
+          },
         },
       );
 
@@ -554,7 +568,52 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     }
   }
 
-  bool _canGenerateVideoForCurrentTopic() => _workspace != null;
+  void _restoreLoadedVideoState(WorkspaceSession workspace) {
+    final artifact = _withResolvedArtifactUrls(workspace.latestMedia);
+    _latestVideoArtifact = artifact;
+    _latestVideoStatus = null;
+    _videoStatusMessage = null;
+    _videoErrorMessage = null;
+    _isVideoGenerating = false;
+    if (artifact?.isReady == true) {
+      _contentMode = _WorkspaceContentMode.videoReady;
+    } else if (artifact?.status.toLowerCase() == 'failed') {
+      _contentMode = _WorkspaceContentMode.videoFailed;
+      _videoErrorMessage = _workspaceMaterial.videoGenerationFailedMessage;
+    } else {
+      _contentMode = _WorkspaceContentMode.choosing;
+    }
+  }
+
+  void _resumePendingVideoPolling(WorkspaceSession workspace) {
+    if (workspace.latestMedia?.isReady == true ||
+        workspace.latestMedia?.status.toLowerCase() == 'failed') {
+      return;
+    }
+    String? jobId;
+    for (final event in workspace.events.reversed) {
+      final queueStatus = event.mediaQueueStatus?.toLowerCase();
+      if (event.eventType == 'media_generated' &&
+          event.mediaJobId != null &&
+          (queueStatus == 'queued' || queueStatus == 'processing')) {
+        jobId = event.mediaJobId;
+        break;
+      }
+    }
+    if (jobId == null || !mounted || _workspace?.id != workspace.id) {
+      return;
+    }
+    setState(() {
+      _isVideoGenerating = true;
+      _contentMode = _WorkspaceContentMode.videoProcessing;
+      _videoStatusMessage = _workspaceMaterial.videoQueuedMessage;
+    });
+    unawaited(_pollVideoStatus(jobId: jobId));
+  }
+
+  bool _canGenerateVideoForCurrentTopic() =>
+      _workspace?.status.toLowerCase() == 'active' &&
+      _workspace?.currentPhase.toLowerCase() == 'explore';
 
   String _normalizedLanguageCode() {
     final workspaceLanguage = _workspace?.learnerLanguage
@@ -977,6 +1036,7 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
             imageUrl: imageUrl,
             isDegraded: !event.isLearner && event.isDegradedTutorTurn,
             timestamp: event.createdAt,
+            toolSuggestion: event.tutorToolSuggestion,
           );
         })
         .whereType<_WorkspaceChatEntry>()
@@ -1311,6 +1371,11 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
                                 onGenerateVideo: () {
                                   unawaited(_generateVideo());
                                 },
+                                onAcceptToolSuggestion: (suggestion) {
+                                  unawaited(
+                                    _generateVideo(suggestion: suggestion),
+                                  );
+                                },
                                 onStartChat: () {
                                   unawaited(_startLearningChat());
                                 },
@@ -1359,18 +1424,21 @@ class _WorkspaceChatEntry {
     this.imageUrl,
     this.isDegraded = false,
     this.timestamp,
+    this.toolSuggestion,
   }) : snapshot = null,
        isSystemNote = false;
 
-  const _WorkspaceChatEntry.canvas(this.snapshot, {this.imageUrl})
+  const _WorkspaceChatEntry.canvas(this.snapshot)
     : text = null,
       isUser = true,
       nextActions = const [],
       evidenceRequest = null,
       explanationCard = null,
+      imageUrl = null,
       isDegraded = false,
       isSystemNote = false,
-      timestamp = null;
+      timestamp = null,
+      toolSuggestion = null;
 
   /// A non-conversational marker in the transcript, e.g. "a video was requested
   /// here". Rendered centred and muted rather than as a chat bubble.
@@ -1382,7 +1450,8 @@ class _WorkspaceChatEntry {
       explanationCard = null,
       imageUrl = null,
       isDegraded = false,
-      isSystemNote = true;
+      isSystemNote = true,
+      toolSuggestion = null;
 
   final String? text;
   final bool isUser;
@@ -1394,12 +1463,14 @@ class _WorkspaceChatEntry {
   final bool isDegraded;
   final bool isSystemNote;
   final DateTime? timestamp;
+  final WorkspaceToolSuggestion? toolSuggestion;
 
   bool get isCanvas => snapshot != null;
   bool get hasStructuredTutorData =>
       nextActions.isNotEmpty ||
       (evidenceRequest?.isNotEmpty ?? false) ||
-      (explanationCard?.isNotEmpty ?? false);
+      (explanationCard?.isNotEmpty ?? false) ||
+      toolSuggestion != null;
 }
 
 class _WorkspaceHistorySheet extends StatelessWidget {
@@ -1554,7 +1625,8 @@ class _LocalizedWorkspaceMaterial {
   bool get isIndonesian => languageCode == 'id';
 
   /// BCP 47 tag for speech synthesis and recognition, which need a region.
-  String get speechLocale => OnboardingCopy.forLanguage(languageCode).speechLocale;
+  String get speechLocale =>
+      OnboardingCopy.forLanguage(languageCode).speechLocale;
 
   String _t(String key, {required String en, required String id}) {
     switch (languageCode) {
@@ -1613,7 +1685,8 @@ class _LocalizedWorkspaceMaterial {
 
   String get workspaceTitleLabel =>
       _t('workspaceTitleLabel', en: 'Workspace', id: 'Ruang belajar');
-  String get newChatLabel => _t('newChatLabel', en: 'New chat', id: 'Chat baru');
+  String get newChatLabel =>
+      _t('newChatLabel', en: 'New chat', id: 'Chat baru');
   String get chatHistoryTitle =>
       _t('chatHistoryTitle', en: 'Chat history', id: 'Riwayat chat');
   String get advancePhaseLabel =>
@@ -1750,6 +1823,18 @@ class _LocalizedWorkspaceMaterial {
     'videoGenerationFailedMessage',
     en: 'Video generation failed.',
     id: 'Pembuatan video gagal.',
+  );
+  String get visualOnlyExploreMessage => _t(
+    'visualOnlyExploreMessage',
+    en: 'Visualizations can only be generated during Explore.',
+    id: 'Visualisasi hanya dapat dibuat saat fase Explore.',
+  );
+  String get visualSuggestionLabel =>
+      _t('visualSuggestionLabel', en: 'Visual support', id: 'Bantuan visual');
+  String get acceptVisualSuggestionLabel => _t(
+    'acceptVisualSuggestionLabel',
+    en: 'Generate visualization',
+    id: 'Buat visualisasi',
   );
   String get retryGenerateVideoLabel => _t(
     'retryGenerateVideoLabel',
@@ -1959,11 +2044,8 @@ class _LocalizedWorkspaceMaterial {
     args: [level],
   );
 
-  String get whyThisModuleLabel => _t(
-    'whyThisModuleLabel',
-    en: 'Why this module?',
-    id: 'Kenapa modul ini?',
-  );
+  String get whyThisModuleLabel =>
+      _t('whyThisModuleLabel', en: 'Why this module?', id: 'Kenapa modul ini?');
 
   String get deleteSessionLabel =>
       _t('deleteSessionLabel', en: 'Delete session', id: 'Hapus sesi');
@@ -2015,6 +2097,7 @@ class _WorkspaceChatPanel extends StatelessWidget {
     required this.videoErrorMessage,
     required this.canGenerateVideo,
     required this.onGenerateVideo,
+    required this.onAcceptToolSuggestion,
     required this.onStartChat,
     required this.onOpenCanvas,
     required this.tutorDegraded,
@@ -2044,6 +2127,7 @@ class _WorkspaceChatPanel extends StatelessWidget {
   final String? videoErrorMessage;
   final bool canGenerateVideo;
   final VoidCallback onGenerateVideo;
+  final ValueChanged<WorkspaceToolSuggestion> onAcceptToolSuggestion;
   final VoidCallback onStartChat;
   final VoidCallback onOpenCanvas;
   final bool tutorDegraded;
@@ -2172,6 +2256,10 @@ class _WorkspaceChatPanel extends StatelessWidget {
                         explanationCard: entry.explanationCard,
                         evidenceRequest: entry.evidenceRequest,
                         nextActions: entry.nextActions,
+                        toolSuggestion: entry.toolSuggestion,
+                        canAcceptToolSuggestion:
+                            canGenerateVideo && !isVideoGenerating,
+                        onAcceptToolSuggestion: onAcceptToolSuggestion,
                         material: material,
                       ),
                     ],
@@ -2679,12 +2767,18 @@ class _StructuredTutorData extends StatelessWidget {
     required this.explanationCard,
     required this.evidenceRequest,
     required this.nextActions,
+    required this.toolSuggestion,
+    required this.canAcceptToolSuggestion,
+    required this.onAcceptToolSuggestion,
     required this.material,
   });
 
   final Map<String, dynamic>? explanationCard;
   final Map<String, dynamic>? evidenceRequest;
   final List<String> nextActions;
+  final WorkspaceToolSuggestion? toolSuggestion;
+  final bool canAcceptToolSuggestion;
+  final ValueChanged<WorkspaceToolSuggestion> onAcceptToolSuggestion;
   final _LocalizedWorkspaceMaterial material;
 
   @override
@@ -2714,7 +2808,81 @@ class _StructuredTutorData extends StatelessWidget {
           const SizedBox(height: 8),
         if (nextActions.isNotEmpty)
           _TutorNextActions(actions: nextActions, material: material),
+        if (nextActions.isNotEmpty && toolSuggestion != null)
+          const SizedBox(height: 8),
+        if (toolSuggestion case final suggestion?)
+          _TutorToolSuggestionCard(
+            suggestion: suggestion,
+            material: material,
+            enabled: canAcceptToolSuggestion,
+            onAccept: () => onAcceptToolSuggestion(suggestion),
+          ),
       ],
+    );
+  }
+}
+
+class _TutorToolSuggestionCard extends StatelessWidget {
+  const _TutorToolSuggestionCard({
+    required this.suggestion,
+    required this.material,
+    required this.enabled,
+    required this.onAccept,
+  });
+
+  final WorkspaceToolSuggestion suggestion;
+  final _LocalizedWorkspaceMaterial material;
+  final bool enabled;
+  final VoidCallback onAccept;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: WicaraColors.primary.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: WicaraColors.primary.withValues(alpha: 0.22)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 11, 12, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(
+                  Icons.auto_awesome_outlined,
+                  size: 17,
+                  color: WicaraColors.primary,
+                ),
+                const SizedBox(width: 7),
+                Text(
+                  material.visualSuggestionLabel,
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: WicaraColors.ink,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 7),
+            Text(
+              suggestion.prompt,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: WicaraColors.text,
+                fontWeight: FontWeight.w600,
+                height: 1.35,
+              ),
+            ),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: enabled ? onAccept : null,
+              icon: const Icon(Icons.smart_display_rounded),
+              label: Text(material.acceptVisualSuggestionLabel),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
