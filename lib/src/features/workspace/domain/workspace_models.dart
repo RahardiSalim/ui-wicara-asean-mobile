@@ -188,6 +188,20 @@ class WorkspaceEvent {
   Map<String, dynamic>? get tutorExplanationCard =>
       _structuredTutorMetadata('explanation_card');
 
+  WorkspaceToolSuggestion? get tutorToolSuggestion {
+    final value = _structuredTutorMetadata('tool_suggestion');
+    return value == null ? null : WorkspaceToolSuggestion.fromMap(value);
+  }
+
+  String? get mediaJobId => _nonEmptyMetadataString('job_id');
+
+  String? get mediaQueueStatus => _nonEmptyMetadataString('queue_status');
+
+  String? _nonEmptyMetadataString(String key) {
+    final value = metadata[key]?.toString().trim() ?? '';
+    return value.isEmpty ? null : value;
+  }
+
   Map<String, dynamic>? _structuredTutorMetadata(String key) {
     final value = metadata[key];
     if (value is! Map) {
@@ -212,6 +226,7 @@ class WorkspaceTutorResponse {
     this.scaffoldLevel = 0,
     this.evidenceRequest,
     this.explanationCard,
+    this.toolSuggestion,
   });
 
   final String text;
@@ -227,6 +242,31 @@ class WorkspaceTutorResponse {
   final int scaffoldLevel;
   final Map<String, dynamic>? evidenceRequest;
   final Map<String, dynamic>? explanationCard;
+  final WorkspaceToolSuggestion? toolSuggestion;
+}
+
+class WorkspaceToolSuggestion {
+  const WorkspaceToolSuggestion({
+    required this.tool,
+    required this.reason,
+    required this.prompt,
+  });
+
+  final String tool;
+  final String reason;
+  final String prompt;
+
+  bool get isVisualization => tool.toLowerCase() == 'visualization';
+
+  static WorkspaceToolSuggestion? fromMap(Map<String, dynamic> value) {
+    final tool = value['tool']?.toString().trim() ?? '';
+    final reason = value['reason']?.toString().trim() ?? '';
+    final prompt = value['prompt']?.toString().trim() ?? '';
+    if (tool.isEmpty || reason.isEmpty || prompt.isEmpty) {
+      return null;
+    }
+    return WorkspaceToolSuggestion(tool: tool, reason: reason, prompt: prompt);
+  }
 }
 
 class WorkspaceMasteryUpdate {

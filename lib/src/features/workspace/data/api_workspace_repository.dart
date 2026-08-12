@@ -366,6 +366,12 @@ WorkspaceAppendResult appendResultFromJson(Map<String, dynamic> json) {
                 tutorResponse['explanation_card'] is Map<String, dynamic>
                 ? tutorResponse['explanation_card'] as Map<String, dynamic>
                 : null,
+            toolSuggestion:
+                tutorResponse['tool_suggestion'] is Map<String, dynamic>
+                ? WorkspaceToolSuggestion.fromMap(
+                    tutorResponse['tool_suggestion'] as Map<String, dynamic>,
+                  )
+                : null,
           )
         : null,
     masteryUpdate: masteryUpdate is Map<String, dynamic>
