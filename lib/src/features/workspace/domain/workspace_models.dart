@@ -133,6 +133,8 @@ class WorkspacePosttestTrigger {
   final String? error;
 
   bool get isReady => status.toLowerCase() == 'ready';
+  bool get isGenerating => status.toLowerCase() == 'generating';
+  bool get isFailed => status.toLowerCase() == 'error';
 }
 
 /// Locally cached pointer to the workspace the learner was last in, for a

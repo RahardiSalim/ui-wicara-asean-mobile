@@ -275,6 +275,43 @@ void main() {
     expect(preferences.getString('auth.lastProtectedRoute'), '/home');
   });
 
+  testWidgets('workspace polls asynchronous posttest generation until ready', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(430, 932);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final repository = _AsyncPosttestWorkspaceRepository();
+    await tester.pumpWidget(
+      await _buildSignedInTestApp(
+        homeRepository: const _WorkspaceReadyHomeRepository(),
+        workspaceRepository: repository,
+        educationLevel: 'elementary',
+        gradeLevel: '4',
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Continue session'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Start learning chat'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Start Posttest'));
+    await tester.tap(find.text('Start Posttest'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Start posttest'));
+    await tester.pump();
+
+    expect(find.text('Preparing posttest...'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 3));
+    await tester.pumpAndSettle();
+
+    expect(repository.fetchWorkspaceCalls, 1);
+    expect(find.text('Posttest Perkalian'), findsWidgets);
+  });
+
   testWidgets('workspace voice input is present and video stops speech', (
     tester,
   ) async {
@@ -1305,6 +1342,54 @@ class _ExploreWorkspaceRepository extends _FakeWorkspaceRepository {
       currentPhase: 'explore',
       phaseTransitionPending: false,
       posttestEligible: false,
+    );
+  }
+}
+
+class _AsyncPosttestWorkspaceRepository extends _FakeWorkspaceRepository {
+  int fetchWorkspaceCalls = 0;
+
+  @override
+  Future<WorkspaceSession> startPosttest({required String workspaceId}) async {
+    return const WorkspaceSession(
+      id: 'workspace-perkalian',
+      trackId: 'track-perkalian',
+      moduleId: 'module-perkalian',
+      currentTopic: 'Perkalian',
+      contentMode: 'chat',
+      status: 'active',
+      events: [],
+      currentPhase: 'evaluate',
+      phaseTransitionPending: false,
+      posttestEligible: true,
+      posttestTrigger: WorkspacePosttestTrigger(
+        status: 'generating',
+        reason: 'evaluate_evidence_verified',
+        posttestSessionId: 'posttest-widget-test',
+      ),
+    );
+  }
+
+  @override
+  Future<WorkspaceSession> fetchWorkspace(String workspaceId) async {
+    fetchWorkspaceCalls += 1;
+    return const WorkspaceSession(
+      id: 'workspace-perkalian',
+      trackId: 'track-perkalian',
+      moduleId: 'module-perkalian',
+      currentTopic: 'Perkalian',
+      contentMode: 'chat',
+      status: 'active',
+      events: [],
+      currentPhase: 'evaluate',
+      phaseTransitionPending: false,
+      posttestEligible: false,
+      posttestTrigger: WorkspacePosttestTrigger(
+        status: 'ready',
+        reason: 'evaluate_evidence_verified',
+        posttestSessionId: 'posttest-widget-test',
+        questionCount: 10,
+      ),
     );
   }
 }

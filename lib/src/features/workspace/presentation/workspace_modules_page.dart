@@ -52,6 +52,8 @@ class WorkspaceModulesPage extends StatefulWidget {
 class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
   static const _videoPollingInterval = Duration(seconds: 3);
   static const _videoPollingTimeout = Duration(minutes: 5);
+  static const _posttestPollingInterval = Duration(seconds: 3);
+  static const _posttestPollingTimeout = Duration(minutes: 10);
 
   final _messageController = TextEditingController();
   final _scrollController = ScrollController();
@@ -77,6 +79,8 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
   WorkspaceTutorResponse? _lastTutorResponse;
   WorkspaceMasteryUpdate? _lastMasteryUpdate;
   String? _activeVideoJobId;
+  bool _stopPosttestPolling = false;
+  String? _activePosttestPollingWorkspaceId;
 
   /// Latest weekly report fetched from HomeRepository. Null while loading or
   /// if no HomeRepository was provided.
@@ -109,6 +113,7 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
   @override
   void dispose() {
     _stopVideoPolling = true;
+    _stopPosttestPolling = true;
     _messageController.dispose();
     _scrollController.dispose();
     super.dispose();
@@ -193,6 +198,7 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
         _isLoadingWorkspace = false;
       });
       _resumePendingVideoPolling(workspace);
+      _resumePendingPosttestPolling(workspace);
       _scrollToBottom();
     } on WorkspaceException catch (error) {
       if (!mounted || requestSerial != _workspaceRequestSerial) return;
@@ -253,6 +259,7 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
         _isLoadingWorkspace = false;
       });
       _resumePendingVideoPolling(workspace);
+      _resumePendingPosttestPolling(workspace);
       _scrollToBottom();
     } on WorkspaceException catch (error) {
       if (!mounted || requestSerial != _workspaceRequestSerial) {
@@ -757,6 +764,10 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
       _openPosttestFromWorkspace();
       return;
     }
+    if (trigger?.isGenerating == true) {
+      _resumePendingPosttestPolling(workspace);
+      return;
+    }
     if (!workspace.posttestEligible) {
       return;
     }
@@ -796,10 +807,12 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
       }
       setState(() {
         _workspace = updated;
-        _isPhaseSubmitting = false;
+        _isPhaseSubmitting = updated.posttestTrigger?.isGenerating == true;
       });
       if (updated.posttestTrigger?.isReady == true) {
         _openPosttestFromWorkspace();
+      } else if (updated.posttestTrigger?.isGenerating == true) {
+        unawaited(_pollPosttestStatus(workspace.id));
       } else {
         setState(() {
           _workspaceError =
@@ -815,6 +828,88 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
         _isPhaseSubmitting = false;
         _workspaceError = error.message;
       });
+    }
+  }
+
+  void _resumePendingPosttestPolling(WorkspaceSession workspace) {
+    if (workspace.posttestTrigger?.isGenerating != true ||
+        _activePosttestPollingWorkspaceId == workspace.id) {
+      return;
+    }
+    if (mounted) {
+      setState(() {
+        _isPhaseSubmitting = true;
+        _workspaceError = null;
+      });
+    }
+    unawaited(_pollPosttestStatus(workspace.id));
+  }
+
+  Future<void> _pollPosttestStatus(String workspaceId) async {
+    if (_activePosttestPollingWorkspaceId == workspaceId) {
+      return;
+    }
+    _activePosttestPollingWorkspaceId = workspaceId;
+    final deadline = DateTime.now().add(_posttestPollingTimeout);
+    String? lastError;
+    try {
+      while (!_stopPosttestPolling && DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(_posttestPollingInterval);
+        if (!mounted || _workspace?.id != workspaceId) {
+          return;
+        }
+        WorkspaceSession refreshed;
+        try {
+          refreshed = await widget.workspaceRepository.fetchWorkspace(
+            workspaceId,
+          );
+          lastError = null;
+        } on WorkspaceException catch (error) {
+          lastError = error.message;
+          continue;
+        }
+        if (!mounted || _workspace?.id != workspaceId) {
+          return;
+        }
+        final trigger = refreshed.posttestTrigger;
+        setState(() {
+          _workspace = refreshed;
+          _chatEntries
+            ..clear()
+            ..addAll(_entriesFromEvents(refreshed.events));
+        });
+        if (trigger?.isReady == true) {
+          setState(() => _isPhaseSubmitting = false);
+          _openPosttestFromWorkspace();
+          return;
+        }
+        if (trigger?.isFailed == true) {
+          setState(() {
+            _isPhaseSubmitting = false;
+            _workspaceError =
+                trigger?.error ?? _workspaceMaterial.posttestUnavailableMessage;
+          });
+          return;
+        }
+        if (trigger?.isGenerating != true) {
+          setState(() {
+            _isPhaseSubmitting = false;
+            _workspaceError = _workspaceMaterial.posttestUnavailableMessage;
+          });
+          return;
+        }
+      }
+      if (mounted && _workspace?.id == workspaceId) {
+        setState(() {
+          _isPhaseSubmitting = false;
+          _workspaceError =
+              lastError ?? _workspaceMaterial.posttestGenerationDelayedMessage;
+        });
+      }
+    } finally {
+      if (_activePosttestPollingWorkspaceId == workspaceId) {
+        _activePosttestPollingWorkspaceId = null;
+      }
     }
   }
 
@@ -1299,7 +1394,13 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
                                         Icons.assignment_turned_in_outlined,
                                       ),
                                       label: Text(
-                                        material.startPosttestButtonLabel,
+                                        workspace
+                                                    ?.posttestTrigger
+                                                    ?.isGenerating ==
+                                                true
+                                            ? material
+                                                  .posttestGeneratingButtonLabel
+                                            : material.startPosttestButtonLabel,
                                       ),
                                     ),
                                   ],
@@ -1732,6 +1833,16 @@ class _LocalizedWorkspaceMaterial {
     'posttestUnavailableMessage',
     en: 'The posttest is not ready yet. Continue with the tutor guidance.',
     id: 'Posttest belum siap. Lanjutkan sesuai arahan tutor.',
+  );
+  String get posttestGeneratingButtonLabel => _t(
+    'posttestGeneratingButtonLabel',
+    en: 'Preparing posttest...',
+    id: 'Menyiapkan posttest...',
+  );
+  String get posttestGenerationDelayedMessage => _t(
+    'posttestGenerationDelayedMessage',
+    en: 'Posttest generation is still running. You can leave and resume this workspace later.',
+    id: 'Posttest masih dibuat. Kamu bisa keluar dan melanjutkan workspace ini nanti.',
   );
   String get workspaceNotReadyMessage => _t(
     'workspaceNotReadyMessage',
