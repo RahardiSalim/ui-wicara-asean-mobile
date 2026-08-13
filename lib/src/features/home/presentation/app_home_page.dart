@@ -917,11 +917,14 @@ class _AppHomePageState extends State<AppHomePage> {
       if (!mounted) {
         return;
       }
+      final refreshedSnapshot = widget.homeRepository.fetchSnapshot();
       setState(() {
         _isSubmittingPosttest = false;
         _posttestResult = result;
         _showPosttest = false;
         _showPosttestResult = true;
+        _homeSnapshotFuture = refreshedSnapshot;
+        _activeGoalFuture = _fetchActiveGoal();
       });
     } catch (error) {
       if (!mounted) {

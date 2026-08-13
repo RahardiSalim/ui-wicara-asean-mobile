@@ -199,9 +199,10 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
+    final homeRepository = _RefreshingReadySessionHomeRepository();
     await tester.pumpWidget(
       await _buildSignedInTestApp(
-        homeRepository: const _ReadySessionOnlyHomeRepository(),
+        homeRepository: homeRepository,
         workspaceRepository: const _FakeWorkspaceRepository(),
         educationLevel: 'elementary',
         gradeLevel: '4',
@@ -265,6 +266,7 @@ void main() {
     expect(find.text('Mastery confirmed'), findsOneWidget);
     expect(find.text('Perkalian'), findsWidgets);
     expect(find.text('100%'), findsWidgets);
+    expect(homeRepository.postFinalizeSnapshotRequested, isTrue);
 
     await tester.ensureVisible(find.text('Continue learning'));
     await tester.tap(find.text('Continue learning'));
@@ -1061,6 +1063,29 @@ class _ReadySessionOnlyHomeRepository extends _WorkspaceReadyHomeRepository {
   @override
   Future<DailyEvaluationSession> fetchPosttest({required String sessionId}) {
     return super.startPosttest();
+  }
+}
+
+class _RefreshingReadySessionHomeRepository
+    extends _ReadySessionOnlyHomeRepository {
+  bool _posttestFinalized = false;
+  bool postFinalizeSnapshotRequested = false;
+
+  @override
+  Future<HomeSnapshot> fetchSnapshot() {
+    if (_posttestFinalized) {
+      postFinalizeSnapshotRequested = true;
+    }
+    return super.fetchSnapshot();
+  }
+
+  @override
+  Future<AdaptivePosttestResult> finalizePosttest({
+    required String sessionId,
+  }) async {
+    final result = await super.finalizePosttest(sessionId: sessionId);
+    _posttestFinalized = true;
+    return result;
   }
 }
 
