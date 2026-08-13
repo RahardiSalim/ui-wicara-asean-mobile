@@ -33,6 +33,8 @@ void main() {
               'next_actions': ['buat_visualisasi', 'minta_petunjuk'],
               'next_phase_ready': false,
               'phase_reasoning': 'More evidence is required.',
+              'phase_checkpoint_question':
+                  'After comparing the two derivative steps, are you sure why the inner derivative is still needed?',
               'evidence_tags': ['identified_outer_function'],
               'correctness': 'partial',
               'misconception_status': 'still_active',
@@ -71,6 +73,10 @@ void main() {
         'minta_petunjuk',
       ]);
       expect(result.tutorResponse?.correctness, 'partial');
+      expect(
+        result.tutorResponse?.phaseCheckpointQuestion,
+        contains('why the inner derivative is still needed'),
+      );
       expect(result.tutorResponse?.evidenceRequest, {'type': 'short_answer'});
       expect(result.tutorResponse?.toolSuggestion?.isVisualization, isTrue);
       expect(

@@ -702,7 +702,7 @@ const copyMs = <String, String>{
   'workspace.advancePhaseLabel': 'Fasa seterusnya',
   'workspace.advancingPhaseLabel': 'Meneruskan fasa...',
   'workspace.phaseTransitionHint': 'Fasa ini selesai. Terus belajar di sini sehingga anda bersedia.',
-  'workspace.phaseCheckpointPrompt': 'Anda telah melengkapkan {0}. Bersedia untuk meneruskan ke {1}?',
+  'workspace.phaseCheckpointPrompt': 'Berdasarkan jawapan anda “{0}” tentang {1}, adakah itu sepadan dengan pemahaman anda sekarang?',
   'workspace.confirmPhaseLabel': 'Ya, teruskan',
   'workspace.stayInPhaseLabel': 'Belum lagi',
   'workspace.startPosttestButtonLabel': 'Mula Pascaujian',

@@ -412,17 +412,26 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Advance phase'), findsNothing);
-    expect(find.textContaining('understood the learning goal'), findsOneWidget);
+    expect(
+      find.textContaining('why three groups of four make twelve'),
+      findsOneWidget,
+    );
 
     await tester.tap(find.text('Not yet'));
     await tester.pumpAndSettle();
     expect(workspaceRepository.advancePhaseCalls, 0);
-    expect(find.textContaining('understood the learning goal'), findsNothing);
+    expect(
+      find.textContaining('why three groups of four make twelve'),
+      findsNothing,
+    );
 
     await tester.enterText(find.byType(TextField).last, 'One more question');
     await tester.testTextInput.receiveAction(TextInputAction.send);
     await tester.pumpAndSettle();
-    expect(find.textContaining('understood the learning goal'), findsOneWidget);
+    expect(
+      find.textContaining('connect 3 × 4 to repeated addition'),
+      findsOneWidget,
+    );
 
     await tester.tap(find.text('Yes'));
     await tester.pumpAndSettle();
@@ -1440,7 +1449,7 @@ class _ExploreWorkspaceRepository extends _FakeWorkspaceRepository {
 class _CheckpointWorkspaceRepository extends _FakeWorkspaceRepository {
   int advancePhaseCalls = 0;
 
-  WorkspaceSession _engageWorkspace({List<WorkspaceEvent> events = const []}) {
+  WorkspaceSession _engageWorkspace({List<WorkspaceEvent>? events}) {
     return WorkspaceSession(
       id: 'workspace-perkalian',
       trackId: 'track-perkalian',
@@ -1448,7 +1457,22 @@ class _CheckpointWorkspaceRepository extends _FakeWorkspaceRepository {
       currentTopic: 'Perkalian',
       contentMode: 'chat',
       status: 'active',
-      events: events,
+      events:
+          events ??
+          const [
+            WorkspaceEvent(
+              id: 'event-tutor-checkpoint',
+              workspaceId: 'workspace-perkalian',
+              eventIndex: 0,
+              eventType: 'text',
+              actorType: 'tutor',
+              textPayload: 'You found the equal groups in the example.',
+              metadata: {
+                'phase_checkpoint_question':
+                    'After arranging 3 × 4 into equal groups, are you confident why three groups of four make twelve?',
+              },
+            ),
+          ],
       currentPhase: 'engage',
       phaseTransitionPending: true,
       posttestEligible: false,
@@ -1480,9 +1504,29 @@ class _CheckpointWorkspaceRepository extends _FakeWorkspaceRepository {
       textPayload: textPayload,
       metadata: metadata,
     );
+    const tutorEvent = WorkspaceEvent(
+      id: 'event-tutor-checkpoint-updated',
+      workspaceId: 'workspace-perkalian',
+      eventIndex: 2,
+      eventType: 'text',
+      actorType: 'tutor',
+      textPayload: 'Let us check that connection.',
+      metadata: {
+        'phase_checkpoint_question':
+            'From your latest example, can you now connect 3 × 4 to repeated addition without help?',
+      },
+    );
     return WorkspaceAppendResult(
       event: event,
-      workspace: _engageWorkspace(events: [event]),
+      tutorResponse: const WorkspaceTutorResponse(
+        text: 'Let us check that connection.',
+        intent: 'engage_probe',
+        nextActions: [],
+        nextPhaseReady: true,
+        phaseCheckpointQuestion:
+            'From your latest example, can you now connect 3 × 4 to repeated addition without help?',
+      ),
+      workspace: _engageWorkspace(events: [event, tutorEvent]),
     );
   }
 

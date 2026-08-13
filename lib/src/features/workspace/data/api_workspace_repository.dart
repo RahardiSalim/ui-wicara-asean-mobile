@@ -440,6 +440,9 @@ WorkspaceAppendResult appendResultFromJson(Map<String, dynamic> json) {
             ),
             nextPhaseReady: _bool(tutorResponse['next_phase_ready']),
             phaseReasoning: _nullableString(tutorResponse['phase_reasoning']),
+            phaseCheckpointQuestion: _nullableString(
+              tutorResponse['phase_checkpoint_question'],
+            ),
             evidenceTags: _stringList(tutorResponse['evidence_tags']),
             correctness: _string(tutorResponse['correctness']).isEmpty
                 ? 'unknown'

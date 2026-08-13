@@ -771,13 +771,37 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     return _declinedPhaseTransition != workspace.currentPhase;
   }
 
-  String _nextPhase(String currentPhase) {
-    const phases = ['engage', 'explore', 'explain', 'elaborate', 'evaluate'];
-    final currentIndex = phases.indexOf(currentPhase.toLowerCase());
-    if (currentIndex < 0 || currentIndex >= phases.length - 1) {
-      return 'evaluate';
+  String _phaseCheckpointQuestion(WorkspaceSession workspace) {
+    final liveQuestion = _lastTutorResponse?.phaseCheckpointQuestion?.trim();
+    if (liveQuestion != null && liveQuestion.isNotEmpty) {
+      return liveQuestion;
     }
-    return phases[currentIndex + 1];
+
+    for (final event in workspace.events.reversed) {
+      final question = event.tutorPhaseCheckpointQuestion?.trim();
+      if (question != null && question.isNotEmpty) {
+        return question;
+      }
+    }
+
+    final topic = workspace.learningContext.currentModuleLabel.trim().isNotEmpty
+        ? workspace.learningContext.currentModuleLabel.trim()
+        : workspace.currentTopic.trim();
+    final latestLearnerText = workspace.events.reversed
+        .where(
+          (event) => event.isLearner && event.textPayload.trim().isNotEmpty,
+        )
+        .map((event) => event.textPayload.trim())
+        .firstOrNull;
+    final reasoning = workspace.events.reversed
+        .map((event) => event.tutorPhaseReasoning?.trim())
+        .whereType<String>()
+        .where((value) => value.isNotEmpty && !value.contains('_'))
+        .firstOrNull;
+    return _workspaceMaterial.phaseCheckpointFallback(
+      topic: topic,
+      learnerEvidence: latestLearnerText ?? reasoning ?? topic,
+    );
   }
 
   void _stayInCurrentPhase() {
@@ -1247,6 +1271,9 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
         workspace?.posttestEligible == true ||
         workspace?.posttestTrigger?.isReady == true;
     final showPhaseCheckpoint = _shouldShowPhaseCheckpoint(workspace);
+    final phaseCheckpointQuestion = workspace == null
+        ? ''
+        : _phaseCheckpointQuestion(workspace);
     final workspaceDescription =
         (_workspace?.currentTopicDescription.trim().isNotEmpty ?? false)
         ? _workspace!.currentTopicDescription.trim()
@@ -1522,9 +1549,7 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
                       },
                       showPhaseCheckpoint: showPhaseCheckpoint,
                       currentPhase: workspace?.currentPhase ?? 'engage',
-                      nextPhase: _nextPhase(
-                        workspace?.currentPhase ?? 'engage',
-                      ),
+                      phaseCheckpointQuestion: phaseCheckpointQuestion,
                       isSending: _isAppendingEvent,
                       isPhaseSubmitting: _isPhaseSubmitting,
                       isVideoGenerating: _isVideoGenerating,
@@ -1831,31 +1856,22 @@ class _LocalizedWorkspaceMaterial {
     id: 'Fase ini selesai. Tetap belajar di sini sampai kamu siap.',
   );
 
-  String phaseCheckpointPrompt(String currentPhase, String nextPhase) {
-    final next = phaseLabel(nextPhase);
-    final normalized = currentPhase.trim().toLowerCase();
-    final enMilestone = switch (normalized) {
-      'explore' => 'tried the idea yourself and found its main pattern',
-      'explain' => 'explained the concept in your own words',
-      'elaborate' => 'applied the concept to a new situation',
-      _ => 'understood the learning goal and its challenge',
-    };
-    final idMilestone = switch (normalized) {
-      'explore' => 'mencoba sendiri dan menemukan pola utamanya',
-      'explain' => 'menjelaskan konsep dengan kata-katamu sendiri',
-      'elaborate' => 'menerapkan konsep pada situasi baru',
-      _ => 'memahami tujuan dan tantangan belajarnya',
-    };
+  String phaseCheckpointFallback({
+    required String topic,
+    required String learnerEvidence,
+  }) {
+    final evidence = learnerEvidence.length <= 96
+        ? learnerEvidence
+        : '${learnerEvidence.substring(0, 93)}...';
     return _tf(
       'phaseCheckpointPrompt',
-      en: 'Have you $enMilestone? If yes, continue to $next?',
-      id: 'Apakah kamu sudah $idMilestone? Jika iya, lanjut ke $next?',
-      args: [phaseLabel(currentPhase), next],
+      en: 'Thinking about your response “$evidence” on $topic, does that match what you understand now?',
+      id: 'Dari jawabanmu “$evidence” tentang $topic, apakah itu sudah sesuai dengan pemahamanmu sekarang?',
+      args: [evidence, topic],
     );
   }
 
-  String get confirmPhaseLabel =>
-      _t('confirmPhaseLabel', en: 'Yes', id: 'Iya');
+  String get confirmPhaseLabel => _t('confirmPhaseLabel', en: 'Yes', id: 'Iya');
   String get stayInPhaseLabel =>
       _t('stayInPhaseLabel', en: 'Not yet', id: 'Belum');
 
@@ -4528,7 +4544,7 @@ class _WorkspaceFooter extends StatelessWidget {
     required this.onGenerateVideo,
     required this.showPhaseCheckpoint,
     required this.currentPhase,
-    required this.nextPhase,
+    required this.phaseCheckpointQuestion,
     required this.isSending,
     required this.isPhaseSubmitting,
     required this.isVideoGenerating,
@@ -4544,7 +4560,7 @@ class _WorkspaceFooter extends StatelessWidget {
   final VoidCallback onGenerateVideo;
   final bool showPhaseCheckpoint;
   final String currentPhase;
-  final String nextPhase;
+  final String phaseCheckpointQuestion;
   final bool isSending;
   final bool isPhaseSubmitting;
   final bool isVideoGenerating;
@@ -4590,10 +4606,7 @@ class _WorkspaceFooter extends StatelessWidget {
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
                           Text(
-                            material.phaseCheckpointPrompt(
-                              currentPhase,
-                              nextPhase,
-                            ),
+                            phaseCheckpointQuestion,
                             textAlign: TextAlign.center,
                             style: Theme.of(context).textTheme.bodyMedium
                                 ?.copyWith(fontWeight: FontWeight.w700),

@@ -701,7 +701,7 @@ const copyVi = <String, String>{
   'workspace.advancePhaseLabel': 'Sang giai đoạn tiếp theo',
   'workspace.advancingPhaseLabel': 'Đang chuyển giai đoạn...',
   'workspace.phaseTransitionHint': 'Giai đoạn này đã hoàn tất. Tiếp tục học ở đây cho đến khi bạn sẵn sàng.',
-  'workspace.phaseCheckpointPrompt': 'Bạn đã hoàn thành {0}. Bạn đã sẵn sàng tiếp tục sang {1} chưa?',
+  'workspace.phaseCheckpointPrompt': 'Từ câu trả lời “{0}” của bạn về {1}, điều đó có đúng với hiểu biết hiện tại của bạn không?',
   'workspace.confirmPhaseLabel': 'Có, tiếp tục',
   'workspace.stayInPhaseLabel': 'Chưa',
   'workspace.startPosttestButtonLabel': 'Bắt đầu Posttest',

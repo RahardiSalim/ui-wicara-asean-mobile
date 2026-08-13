@@ -697,7 +697,7 @@ const copyTh = <String, String>{
   'workspace.advancePhaseLabel': 'ไปเฟสถัดไป',
   'workspace.advancingPhaseLabel': 'กำลังไปเฟสถัดไป...',
   'workspace.phaseTransitionHint': 'เฟสนี้เสร็จแล้ว เรียนต่อที่นี่จนกว่าคุณจะพร้อม',
-  'workspace.phaseCheckpointPrompt': 'คุณทำ {0} เสร็จแล้ว พร้อมไปต่อที่ {1} หรือยัง?',
+  'workspace.phaseCheckpointPrompt': 'จากคำตอบ “{0}” ของคุณเกี่ยวกับ {1} สิ่งนี้ตรงกับความเข้าใจของคุณตอนนี้หรือไม่?',
   'workspace.confirmPhaseLabel': 'ใช่ ไปต่อ',
   'workspace.stayInPhaseLabel': 'ยังไม่พร้อม',
   'workspace.startPosttestButtonLabel': 'เริ่มแบบทดสอบหลังเรียน',

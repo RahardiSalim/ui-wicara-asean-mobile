@@ -218,6 +218,11 @@ class WorkspaceEvent {
   Map<String, dynamic>? get tutorExplanationCard =>
       _structuredTutorMetadata('explanation_card');
 
+  String? get tutorPhaseCheckpointQuestion =>
+      _nonEmptyMetadataString('phase_checkpoint_question');
+
+  String? get tutorPhaseReasoning => _nonEmptyMetadataString('phase_reasoning');
+
   WorkspaceToolSuggestion? get tutorToolSuggestion {
     final value = _structuredTutorMetadata('tool_suggestion');
     return value == null ? null : WorkspaceToolSuggestion.fromMap(value);
@@ -248,6 +253,7 @@ class WorkspaceTutorResponse {
     required this.nextActions,
     required this.nextPhaseReady,
     this.phaseReasoning,
+    this.phaseCheckpointQuestion,
     this.evidenceTags = const [],
     this.correctness = 'unknown',
     this.misconceptionStatus = 'none',
@@ -265,6 +271,7 @@ class WorkspaceTutorResponse {
   final List<String> nextActions;
   final bool nextPhaseReady;
   final String? phaseReasoning;
+  final String? phaseCheckpointQuestion;
   final List<String> evidenceTags;
   final String correctness;
   final String misconceptionStatus;

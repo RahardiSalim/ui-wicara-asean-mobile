@@ -702,7 +702,7 @@ const copyFil = <String, String>{
   'workspace.advancePhaseLabel': 'Susunod na phase',
   'workspace.advancingPhaseLabel': 'Nagpapatuloy sa susunod na phase...',
   'workspace.phaseTransitionHint': 'Tapos na ang phase na ito. Manatili rito hanggang handa ka na.',
-  'workspace.phaseCheckpointPrompt': 'Natapos mo na ang {0}. Handa ka na bang magpatuloy sa {1}?',
+  'workspace.phaseCheckpointPrompt': 'Batay sa sagot mong “{0}” tungkol sa {1}, tugma ba ito sa pagkaunawa mo ngayon?',
   'workspace.confirmPhaseLabel': 'Oo, magpatuloy',
   'workspace.stayInPhaseLabel': 'Hindi pa',
   'workspace.startPosttestButtonLabel': 'Simulan ang Posttest',
