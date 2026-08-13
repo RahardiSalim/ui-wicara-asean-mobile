@@ -459,6 +459,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Work evidence'), findsOneWidget);
     expect(find.text('Upload work image'), findsOneWidget);
+    expect(find.text('Submit answer'), findsNothing);
+    expect(find.text('Submit answer with evidence'), findsOneWidget);
 
     await tester.enterText(find.byType(TextField).last, '4 groups of 3 is 12');
     await tester.ensureVisible(find.text('Submit answer with evidence'));

@@ -646,11 +646,12 @@ class _QuestionStage extends StatelessWidget {
                       const SizedBox(height: 10),
                   ],
                   const SizedBox(height: 19),
-                  GradientButton(
-                    label: submitLabel,
-                    onPressed: selectedOptionId.isEmpty ? null : onSubmit,
-                    isLoading: isSubmitting,
-                  ),
+                  if (!showEvidence)
+                    GradientButton(
+                      label: submitLabel,
+                      onPressed: selectedOptionId.isEmpty ? null : onSubmit,
+                      isLoading: isSubmitting,
+                    ),
                   if (isSubmitting) ...[
                     const SizedBox(height: 9),
                     Text(
