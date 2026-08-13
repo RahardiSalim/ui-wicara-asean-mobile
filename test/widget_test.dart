@@ -412,19 +412,19 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('Advance phase'), findsNothing);
-    expect(find.textContaining('completed Engage'), findsOneWidget);
+    expect(find.textContaining('understood the learning goal'), findsOneWidget);
 
     await tester.tap(find.text('Not yet'));
     await tester.pumpAndSettle();
     expect(workspaceRepository.advancePhaseCalls, 0);
-    expect(find.textContaining('completed Engage'), findsNothing);
+    expect(find.textContaining('understood the learning goal'), findsNothing);
 
     await tester.enterText(find.byType(TextField).last, 'One more question');
     await tester.testTextInput.receiveAction(TextInputAction.send);
     await tester.pumpAndSettle();
-    expect(find.textContaining('completed Engage'), findsOneWidget);
+    expect(find.textContaining('understood the learning goal'), findsOneWidget);
 
-    await tester.tap(find.text('Yes, continue'));
+    await tester.tap(find.text('Yes'));
     await tester.pumpAndSettle();
     expect(workspaceRepository.advancePhaseCalls, 1);
     expect(find.text('Explore'), findsWidgets);

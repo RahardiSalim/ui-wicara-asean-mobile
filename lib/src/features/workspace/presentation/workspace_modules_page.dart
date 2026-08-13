@@ -1832,18 +1832,30 @@ class _LocalizedWorkspaceMaterial {
   );
 
   String phaseCheckpointPrompt(String currentPhase, String nextPhase) {
-    final current = phaseLabel(currentPhase);
     final next = phaseLabel(nextPhase);
+    final normalized = currentPhase.trim().toLowerCase();
+    final enMilestone = switch (normalized) {
+      'explore' => 'tried the idea yourself and found its main pattern',
+      'explain' => 'explained the concept in your own words',
+      'elaborate' => 'applied the concept to a new situation',
+      _ => 'understood the learning goal and its challenge',
+    };
+    final idMilestone = switch (normalized) {
+      'explore' => 'mencoba sendiri dan menemukan pola utamanya',
+      'explain' => 'menjelaskan konsep dengan kata-katamu sendiri',
+      'elaborate' => 'menerapkan konsep pada situasi baru',
+      _ => 'memahami tujuan dan tantangan belajarnya',
+    };
     return _tf(
       'phaseCheckpointPrompt',
-      en: 'You have completed $current. Are you ready to continue to $next?',
-      id: 'Kamu sudah menyelesaikan $current. Siap lanjut ke $next?',
-      args: [current, next],
+      en: 'Have you $enMilestone? If yes, continue to $next?',
+      id: 'Apakah kamu sudah $idMilestone? Jika iya, lanjut ke $next?',
+      args: [phaseLabel(currentPhase), next],
     );
   }
 
   String get confirmPhaseLabel =>
-      _t('confirmPhaseLabel', en: 'Yes, continue', id: 'Ya, lanjut');
+      _t('confirmPhaseLabel', en: 'Yes', id: 'Iya');
   String get stayInPhaseLabel =>
       _t('stayInPhaseLabel', en: 'Not yet', id: 'Belum');
 
