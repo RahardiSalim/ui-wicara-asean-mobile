@@ -201,7 +201,7 @@ void main() {
 
     await tester.pumpWidget(
       await _buildSignedInTestApp(
-        homeRepository: const _WorkspaceReadyHomeRepository(),
+        homeRepository: const _ReadySessionOnlyHomeRepository(),
         workspaceRepository: const _FakeWorkspaceRepository(),
         educationLevel: 'elementary',
         gradeLevel: '4',
@@ -286,7 +286,7 @@ void main() {
     final repository = _AsyncPosttestWorkspaceRepository();
     await tester.pumpWidget(
       await _buildSignedInTestApp(
-        homeRepository: const _WorkspaceReadyHomeRepository(),
+        homeRepository: const _ReadySessionOnlyHomeRepository(),
         workspaceRepository: repository,
         educationLevel: 'elementary',
         gradeLevel: '4',
@@ -962,6 +962,11 @@ class _FakeHomeRepository implements HomeRepository {
   }
 
   @override
+  Future<DailyEvaluationSession> fetchPosttest({required String sessionId}) {
+    return startPosttest();
+  }
+
+  @override
   Future<DailyEvaluationAnswerResult> submitPosttestAnswer({
     required String sessionId,
     required String questionId,
@@ -1035,6 +1040,25 @@ class _WorkspaceReadyHomeRepository extends _FakeHomeRepository {
         status: 'ready',
       ),
     );
+  }
+}
+
+class _ReadySessionOnlyHomeRepository extends _WorkspaceReadyHomeRepository {
+  const _ReadySessionOnlyHomeRepository();
+
+  @override
+  Future<DailyEvaluationSession> startPosttest({
+    String? workspaceSessionId,
+    String? learningGoalId,
+    String? trackId,
+    String? moduleId,
+  }) {
+    throw StateError('A ready workspace must reuse its posttest session.');
+  }
+
+  @override
+  Future<DailyEvaluationSession> fetchPosttest({required String sessionId}) {
+    return super.startPosttest();
   }
 }
 

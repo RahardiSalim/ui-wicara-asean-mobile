@@ -791,6 +791,7 @@ class _AppHomePageState extends State<AppHomePage> {
       _lastPosttestTrackId = result.trackId;
       _lastPosttestModuleId = result.moduleId;
       _openPosttest(
+        posttestSessionId: result.posttestSessionId,
         workspaceSessionId: result.workspaceSessionId,
         trackId: result.trackId,
         moduleId: result.moduleId,
@@ -799,6 +800,7 @@ class _AppHomePageState extends State<AppHomePage> {
   }
 
   Future<void> _openPosttest({
+    String? posttestSessionId,
     String? workspaceSessionId,
     String? trackId,
     String? moduleId,
@@ -828,17 +830,24 @@ class _AppHomePageState extends State<AppHomePage> {
           : workspaceSessionId;
       final resolvedTrackId = trackId ?? _lastPosttestTrackId;
       final resolvedModuleId = moduleId ?? _lastPosttestModuleId;
-      final session = await widget.homeRepository.startPosttest(
-        workspaceSessionId: resolvedWorkspaceSessionId,
-        trackId:
-            resolvedWorkspaceSessionId == null && resolvedTrackId.isNotEmpty
-            ? resolvedTrackId
-            : null,
-        moduleId:
-            resolvedWorkspaceSessionId == null && resolvedModuleId.isNotEmpty
-            ? resolvedModuleId
-            : null,
-      );
+      final resolvedPosttestSessionId = (posttestSessionId ?? '').isEmpty
+          ? null
+          : posttestSessionId;
+      final session = resolvedPosttestSessionId != null
+          ? await widget.homeRepository.fetchPosttest(
+              sessionId: resolvedPosttestSessionId,
+            )
+          : await widget.homeRepository.startPosttest(
+              workspaceSessionId: resolvedWorkspaceSessionId,
+              trackId:
+                  resolvedWorkspaceSessionId == null && resolvedTrackId.isNotEmpty
+                  ? resolvedTrackId
+                  : null,
+              moduleId:
+                  resolvedWorkspaceSessionId == null && resolvedModuleId.isNotEmpty
+                  ? resolvedModuleId
+                  : null,
+            );
       if (!mounted) {
         return;
       }

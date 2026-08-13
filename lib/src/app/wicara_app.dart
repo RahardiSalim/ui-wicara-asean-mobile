@@ -507,6 +507,11 @@ class _UnavailableHomeRepository implements HomeRepository {
   }
 
   @override
+  Future<DailyEvaluationSession> fetchPosttest({required String sessionId}) {
+    throw UnimplementedError('HomeRepository is not configured.');
+  }
+
+  @override
   Future<DailyEvaluationAnswerResult> submitPosttestAnswer({
     required String sessionId,
     required String questionId,

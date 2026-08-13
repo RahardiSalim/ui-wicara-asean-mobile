@@ -20,6 +20,7 @@ class WorkspaceCompletionResult {
     required this.moduleCompleted,
     required this.requestedEarlyPosttest,
     this.workspaceSessionId,
+    this.posttestSessionId,
   });
 
   final String trackId;
@@ -28,6 +29,7 @@ class WorkspaceCompletionResult {
   final bool moduleCompleted;
   final bool requestedEarlyPosttest;
   final String? workspaceSessionId;
+  final String? posttestSessionId;
 }
 
 class WorkspaceSession {

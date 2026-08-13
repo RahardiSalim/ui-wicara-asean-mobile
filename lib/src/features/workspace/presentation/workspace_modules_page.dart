@@ -926,6 +926,7 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
         moduleCompleted: _workspace?.status == 'completed',
         requestedEarlyPosttest: false,
         workspaceSessionId: _workspace?.id,
+        posttestSessionId: _workspace?.posttestTrigger?.posttestSessionId,
       ),
     );
   }

@@ -207,6 +207,18 @@ class ApiHomeRepository implements HomeRepository {
   }
 
   @override
+  Future<DailyEvaluationSession> fetchPosttest({
+    required String sessionId,
+  }) async {
+    final token = _requireToken();
+    final json = await _apiClient.getJson(
+      '/api/v1/posttests/$sessionId',
+      headers: {'Authorization': 'Bearer $token'},
+    );
+    return _posttestSessionFromJson(json);
+  }
+
+  @override
   Future<DailyEvaluationAnswerResult> submitPosttestAnswer({
     required String sessionId,
     required String questionId,
