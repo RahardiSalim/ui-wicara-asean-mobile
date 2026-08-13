@@ -390,6 +390,46 @@ void main() {
     );
   });
 
+  testWidgets('workspace phase checkpoint advances only after confirmation', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(430, 932);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final workspaceRepository = _CheckpointWorkspaceRepository();
+    await tester.pumpWidget(
+      await _buildSignedInTestApp(
+        homeRepository: const _WorkspaceReadyHomeRepository(),
+        workspaceRepository: workspaceRepository,
+        educationLevel: 'elementary',
+        gradeLevel: '4',
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue session'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Advance phase'), findsNothing);
+    expect(find.textContaining('completed Engage'), findsOneWidget);
+
+    await tester.tap(find.text('Not yet'));
+    await tester.pumpAndSettle();
+    expect(workspaceRepository.advancePhaseCalls, 0);
+    expect(find.textContaining('completed Engage'), findsNothing);
+
+    await tester.enterText(find.byType(TextField).last, 'One more question');
+    await tester.testTextInput.receiveAction(TextInputAction.send);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('completed Engage'), findsOneWidget);
+
+    await tester.tap(find.text('Yes, continue'));
+    await tester.pumpAndSettle();
+    expect(workspaceRepository.advancePhaseCalls, 1);
+    expect(find.text('Explore'), findsWidgets);
+  });
+
   testWidgets('learning report detail renders backend payload', (tester) async {
     tester.view.physicalSize = const Size(430, 932);
     tester.view.devicePixelRatio = 1;
@@ -1390,6 +1430,73 @@ class _ExploreWorkspaceRepository extends _FakeWorkspaceRepository {
       contentMode: 'chat',
       status: 'active',
       events: const [],
+      currentPhase: 'explore',
+      phaseTransitionPending: false,
+      posttestEligible: false,
+    );
+  }
+}
+
+class _CheckpointWorkspaceRepository extends _FakeWorkspaceRepository {
+  int advancePhaseCalls = 0;
+
+  WorkspaceSession _engageWorkspace({List<WorkspaceEvent> events = const []}) {
+    return WorkspaceSession(
+      id: 'workspace-perkalian',
+      trackId: 'track-perkalian',
+      moduleId: 'module-perkalian',
+      currentTopic: 'Perkalian',
+      contentMode: 'chat',
+      status: 'active',
+      events: events,
+      currentPhase: 'engage',
+      phaseTransitionPending: true,
+      posttestEligible: false,
+    );
+  }
+
+  @override
+  Future<WorkspaceSession> createOrResumeWorkspace({
+    required String trackId,
+    required String moduleId,
+    String? workspaceSessionId,
+    bool startNewSession = false,
+  }) async => _engageWorkspace();
+
+  @override
+  Future<WorkspaceAppendResult> appendEvent({
+    required String workspaceId,
+    required String eventType,
+    String textPayload = '',
+    Map<String, dynamic> metadata = const {},
+    String? imageAssetId,
+  }) async {
+    final event = WorkspaceEvent(
+      id: 'event-checkpoint',
+      workspaceId: workspaceId,
+      eventIndex: 1,
+      eventType: eventType,
+      actorType: 'learner',
+      textPayload: textPayload,
+      metadata: metadata,
+    );
+    return WorkspaceAppendResult(
+      event: event,
+      workspace: _engageWorkspace(events: [event]),
+    );
+  }
+
+  @override
+  Future<WorkspaceSession> advancePhase({required String workspaceId}) async {
+    advancePhaseCalls += 1;
+    return const WorkspaceSession(
+      id: 'workspace-perkalian',
+      trackId: 'track-perkalian',
+      moduleId: 'module-perkalian',
+      currentTopic: 'Perkalian',
+      contentMode: 'chat',
+      status: 'active',
+      events: [],
       currentPhase: 'explore',
       phaseTransitionPending: false,
       posttestEligible: false,

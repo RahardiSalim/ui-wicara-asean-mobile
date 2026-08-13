@@ -81,6 +81,7 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
   String? _activeVideoJobId;
   bool _stopPosttestPolling = false;
   String? _activePosttestPollingWorkspaceId;
+  String? _declinedPhaseTransition;
 
   /// Latest weekly report fetched from HomeRepository. Null while loading or
   /// if no HomeRepository was provided.
@@ -273,6 +274,7 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
   }
 
   void _resetCurrentChatState({String? nextActiveSessionId}) {
+    _declinedPhaseTransition = null;
     _workspace = null;
     _activeSessionId = nextActiveSessionId;
     _isAppendingEvent = false;
@@ -715,6 +717,7 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     setState(() {
       _isPhaseSubmitting = true;
       _workspaceError = null;
+      _declinedPhaseTransition = null;
     });
     try {
       final updated = await widget.workspaceRepository.advancePhase(
@@ -742,6 +745,7 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
         _workspace = updated;
         _sessionHistory = history;
         _isPhaseSubmitting = false;
+        _declinedPhaseTransition = null;
       });
     } on WorkspaceException catch (error) {
       if (!mounted || _workspace?.id != workspace.id) {
@@ -752,6 +756,36 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
         _workspaceError = error.message;
       });
     }
+  }
+
+  bool _shouldShowPhaseCheckpoint(WorkspaceSession? workspace) {
+    if (workspace == null ||
+        workspace.currentPhase.toLowerCase() == 'evaluate' ||
+        workspace.status.toLowerCase() != 'active' ||
+        !workspace.phaseTransitionPending ||
+        _isLoadingWorkspace ||
+        _isAppendingEvent ||
+        _isPhaseSubmitting) {
+      return false;
+    }
+    return _declinedPhaseTransition != workspace.currentPhase;
+  }
+
+  String _nextPhase(String currentPhase) {
+    const phases = ['engage', 'explore', 'explain', 'elaborate', 'evaluate'];
+    final currentIndex = phases.indexOf(currentPhase.toLowerCase());
+    if (currentIndex < 0 || currentIndex >= phases.length - 1) {
+      return 'evaluate';
+    }
+    return phases[currentIndex + 1];
+  }
+
+  void _stayInCurrentPhase() {
+    final workspace = _workspace;
+    if (workspace == null) {
+      return;
+    }
+    setState(() => _declinedPhaseTransition = workspace.currentPhase);
   }
 
   Future<void> _startPosttestFromWorkspace() async {
@@ -1075,6 +1109,7 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
         _isAppendingEvent = false;
         _lastTutorResponse = result.tutorResponse;
         _lastMasteryUpdate = result.masteryUpdate;
+        _declinedPhaseTransition = null;
       });
     } on WorkspaceException catch (error) {
       if (!mounted || _workspace?.id != workspace.id) return;
@@ -1178,19 +1213,6 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     );
   }
 
-  bool _canAdvancePhase(WorkspaceSession? workspace) {
-    if (workspace == null) {
-      return false;
-    }
-    if (workspace.currentPhase == 'evaluate') {
-      return false;
-    }
-    if (_isLoadingWorkspace || _isPhaseSubmitting || _isAppendingEvent) {
-      return false;
-    }
-    return workspace.phaseTransitionPending;
-  }
-
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scrollController.hasClients) return;
@@ -1224,7 +1246,7 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     final showStartPosttestButton =
         workspace?.posttestEligible == true ||
         workspace?.posttestTrigger?.isReady == true;
-    final canAdvancePhase = _canAdvancePhase(workspace);
+    final showPhaseCheckpoint = _shouldShowPhaseCheckpoint(workspace);
     final workspaceDescription =
         (_workspace?.currentTopicDescription.trim().isNotEmpty ?? false)
         ? _workspace!.currentTopicDescription.trim()
@@ -1491,13 +1513,18 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
                     _WorkspaceFooter(
                       controller: _messageController,
                       onSend: _sendMessage,
-                      onAdvancePhase: () {
+                      onConfirmPhase: () {
                         unawaited(_advancePhase());
                       },
+                      onStayInPhase: _stayInCurrentPhase,
                       onGenerateVideo: () {
                         unawaited(_generateVideo());
                       },
-                      canAdvancePhase: canAdvancePhase,
+                      showPhaseCheckpoint: showPhaseCheckpoint,
+                      currentPhase: workspace?.currentPhase ?? 'engage',
+                      nextPhase: _nextPhase(
+                        workspace?.currentPhase ?? 'engage',
+                      ),
                       isSending: _isAppendingEvent,
                       isPhaseSubmitting: _isPhaseSubmitting,
                       isVideoGenerating: _isVideoGenerating,
@@ -1800,9 +1827,25 @@ class _LocalizedWorkspaceMaterial {
   );
   String get phaseTransitionHint => _t(
     'phaseTransitionHint',
-    en: "Tap 'Advance phase' when you are ready.",
-    id: "Tekan 'Lanjut fase' kalau sudah paham.",
+    en: 'This phase is complete. Keep learning here until you are ready.',
+    id: 'Fase ini selesai. Tetap belajar di sini sampai kamu siap.',
   );
+
+  String phaseCheckpointPrompt(String currentPhase, String nextPhase) {
+    final current = phaseLabel(currentPhase);
+    final next = phaseLabel(nextPhase);
+    return _tf(
+      'phaseCheckpointPrompt',
+      en: 'You have completed $current. Are you ready to continue to $next?',
+      id: 'Kamu sudah menyelesaikan $current. Siap lanjut ke $next?',
+      args: [current, next],
+    );
+  }
+
+  String get confirmPhaseLabel =>
+      _t('confirmPhaseLabel', en: 'Yes, continue', id: 'Ya, lanjut');
+  String get stayInPhaseLabel =>
+      _t('stayInPhaseLabel', en: 'Not yet', id: 'Belum');
 
   /// The 5E phase names are kept untranslated on purpose — they are the
   /// pedagogical model's proper names and are used as identifiers in the UI.
@@ -4468,9 +4511,12 @@ class _WorkspaceFooter extends StatelessWidget {
   const _WorkspaceFooter({
     required this.controller,
     required this.onSend,
-    required this.onAdvancePhase,
+    required this.onConfirmPhase,
+    required this.onStayInPhase,
     required this.onGenerateVideo,
-    required this.canAdvancePhase,
+    required this.showPhaseCheckpoint,
+    required this.currentPhase,
+    required this.nextPhase,
     required this.isSending,
     required this.isPhaseSubmitting,
     required this.isVideoGenerating,
@@ -4481,9 +4527,12 @@ class _WorkspaceFooter extends StatelessWidget {
 
   final TextEditingController controller;
   final VoidCallback onSend;
-  final VoidCallback onAdvancePhase;
+  final VoidCallback onConfirmPhase;
+  final VoidCallback onStayInPhase;
   final VoidCallback onGenerateVideo;
-  final bool canAdvancePhase;
+  final bool showPhaseCheckpoint;
+  final String currentPhase;
+  final String nextPhase;
   final bool isSending;
   final bool isPhaseSubmitting;
   final bool isVideoGenerating;
@@ -4511,56 +4560,107 @@ class _WorkspaceFooter extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: canAdvancePhase && !isPhaseSubmitting
-                        ? onAdvancePhase
-                        : null,
-                    icon: Icon(
-                      isPhaseSubmitting
-                          ? Icons.hourglass_bottom_rounded
-                          : Icons.skip_next_rounded,
-                    ),
-                    label: Text(
-                      isPhaseSubmitting
-                          ? material.advancingPhaseLabel
-                          : material.advancePhaseLabel,
-                    ),
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size.fromHeight(44),
-                      padding: const EdgeInsets.symmetric(horizontal: 10),
-                    ),
-                  ),
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 220),
+              transitionBuilder: (child, animation) => FadeTransition(
+                opacity: animation,
+                child: SizeTransition(
+                  sizeFactor: animation,
+                  axisAlignment: 1,
+                  child: child,
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: !isVideoGenerating && canGenerateVideo
-                        ? onGenerateVideo
-                        : null,
-                    icon: Icon(
-                      isVideoGenerating
-                          ? Icons.hourglass_bottom_rounded
-                          : Icons.smart_display_rounded,
+              ),
+              child: showPhaseCheckpoint
+                  ? Padding(
+                      key: ValueKey('phase-checkpoint-$currentPhase'),
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text(
+                            material.phaseCheckpointPrompt(
+                              currentPhase,
+                              nextPhase,
+                            ),
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context).textTheme.bodyMedium
+                                ?.copyWith(fontWeight: FontWeight.w700),
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: OutlinedButton(
+                                  onPressed: onStayInPhase,
+                                  child: Text(material.stayInPhaseLabel),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: FilledButton(
+                                  onPressed: onConfirmPhase,
+                                  child: Text(material.confirmPhaseLabel),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    )
+                  : const SizedBox.shrink(
+                      key: ValueKey('phase-checkpoint-hidden'),
                     ),
-                    label: Text(
-                      isVideoGenerating
-                          ? material.generatingVideoButtonLabel
-                          : material.generateVideoFromChatLabel,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size.fromHeight(44),
-                      padding: const EdgeInsets.symmetric(horizontal: 10),
-                    ),
-                  ),
-                ),
-              ],
             ),
-            const SizedBox(height: 8),
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 180),
+              child: isPhaseSubmitting
+                  ? Padding(
+                      key: const ValueKey('automatic-phase-transition'),
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const SizedBox.square(
+                            dimension: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                          const SizedBox(width: 9),
+                          Text(
+                            material.advancingPhaseLabel,
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(fontWeight: FontWeight.w700),
+                          ),
+                        ],
+                      ),
+                    )
+                  : const SizedBox.shrink(
+                      key: ValueKey('automatic-phase-idle'),
+                    ),
+            ),
+            if (canGenerateVideo || isVideoGenerating) ...[
+              FilledButton.icon(
+                onPressed: !isVideoGenerating && canGenerateVideo
+                    ? onGenerateVideo
+                    : null,
+                icon: Icon(
+                  isVideoGenerating
+                      ? Icons.hourglass_bottom_rounded
+                      : Icons.smart_display_rounded,
+                ),
+                label: Text(
+                  isVideoGenerating
+                      ? material.generatingVideoButtonLabel
+                      : material.generateVideoFromChatLabel,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size.fromHeight(44),
+                  padding: const EdgeInsets.symmetric(horizontal: 10),
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
             _WorkspaceComposerInput(
               controller: controller,
               onSend: onSend,
