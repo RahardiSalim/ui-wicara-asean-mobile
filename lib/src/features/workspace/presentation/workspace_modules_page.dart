@@ -804,12 +804,30 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     );
   }
 
-  void _stayInCurrentPhase() {
+  Future<void> _stayInCurrentPhase() async {
     final workspace = _workspace;
-    if (workspace == null) {
+    if (workspace == null ||
+        _isLoadingWorkspace ||
+        _isAppendingEvent ||
+        _isPhaseSubmitting ||
+        !workspace.phaseTransitionPending) {
       return;
     }
-    setState(() => _declinedPhaseTransition = workspace.currentPhase);
+    final message = _workspaceMaterial.stayInPhaseMessage;
+    setState(() {
+      _declinedPhaseTransition = workspace.currentPhase;
+      _chatEntries.add(_WorkspaceChatEntry.text(text: message, isUser: true));
+    });
+    _scrollToBottom();
+    await _appendWorkspaceEvent(
+      eventType: 'text',
+      textPayload: message,
+      metadata: const {
+        'interaction_type': 'phase_checkpoint',
+        'checkpoint_decision': 'stay',
+      },
+    );
+    _scrollToBottom();
   }
 
   Future<void> _startPosttestFromWorkspace() async {
@@ -1085,7 +1103,7 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     _scrollToBottom();
   }
 
-  Future<void> _appendWorkspaceEvent({
+  Future<bool> _appendWorkspaceEvent({
     required String eventType,
     String textPayload = '',
     Map<String, dynamic> metadata = const {},
@@ -1096,7 +1114,7 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
       setState(() {
         _workspaceError = _workspaceMaterial.workspaceNotReadyMessage;
       });
-      return;
+      return false;
     }
     setState(() {
       _isAppendingEvent = true;
@@ -1110,7 +1128,7 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
         metadata: metadata,
         imageAssetId: imageAssetId,
       );
-      if (!mounted || _workspace?.id != workspace.id) return;
+      if (!mounted || _workspace?.id != workspace.id) return false;
       final arguments = widget.routeArguments;
       var history = _sessionHistory;
       if (arguments != null && arguments.isValid) {
@@ -1123,7 +1141,7 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
           history = _sessionHistory;
         }
       }
-      if (!mounted || _workspace?.id != workspace.id) return;
+      if (!mounted || _workspace?.id != workspace.id) return false;
       setState(() {
         _workspace = result.workspace;
         _sessionHistory = history;
@@ -1135,11 +1153,13 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
         _lastMasteryUpdate = result.masteryUpdate;
         _declinedPhaseTransition = null;
       });
+      return true;
     } on WorkspaceException catch (error) {
-      if (!mounted || _workspace?.id != workspace.id) return;
+      if (!mounted || _workspace?.id != workspace.id) return false;
       setState(() {
         _isAppendingEvent = false;
         _workspaceError = error.message;
+        _declinedPhaseTransition = null;
         _chatEntries.add(
           _WorkspaceChatEntry.text(
             text: _workspaceMaterial.workspaceSyncFailedMessage(error.message),
@@ -1147,6 +1167,7 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
           ),
         );
       });
+      return false;
     }
   }
 
@@ -1874,6 +1895,11 @@ class _LocalizedWorkspaceMaterial {
   String get confirmPhaseLabel => _t('confirmPhaseLabel', en: 'Yes', id: 'Iya');
   String get stayInPhaseLabel =>
       _t('stayInPhaseLabel', en: 'Not yet', id: 'Belum');
+  String get stayInPhaseMessage => _t(
+    'stayInPhaseMessage',
+    en: 'Not yet, I still need help with this part.',
+    id: 'Belum, bagian ini masih belum jelas buat saya.',
+  );
 
   /// The 5E phase names are kept untranslated on purpose — they are the
   /// pedagogical model's proper names and are used as identifiers in the UI.

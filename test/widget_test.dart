@@ -420,6 +420,20 @@ void main() {
     await tester.tap(find.text('Not yet'));
     await tester.pumpAndSettle();
     expect(workspaceRepository.advancePhaseCalls, 0);
+    expect(workspaceRepository.appendedEvents, hasLength(1));
+    expect(
+      workspaceRepository.appendedEvents.single.metadata,
+      containsPair('interaction_type', 'phase_checkpoint'),
+    );
+    expect(
+      workspaceRepository.appendedEvents.single.metadata,
+      containsPair('checkpoint_decision', 'stay'),
+    );
+    expect(
+      find.text('Not yet, I still need help with this part.'),
+      findsOneWidget,
+    );
+    expect(find.text('Let us use a different example.'), findsOneWidget);
     expect(
       find.textContaining('why three groups of four make twelve'),
       findsNothing,
@@ -437,6 +451,43 @@ void main() {
     await tester.pumpAndSettle();
     expect(workspaceRepository.advancePhaseCalls, 1);
     expect(find.text('Explore'), findsWidgets);
+  });
+
+  testWidgets('failed checkpoint stay keeps the checkpoint retryable', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(430, 932);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final workspaceRepository = _CheckpointWorkspaceRepository(
+      failNextCheckpointStay: true,
+    );
+    await tester.pumpWidget(
+      await _buildSignedInTestApp(
+        homeRepository: const _WorkspaceReadyHomeRepository(),
+        workspaceRepository: workspaceRepository,
+        educationLevel: 'elementary',
+        gradeLevel: '4',
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue session'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Not yet'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Not yet'), findsOneWidget);
+    expect(
+      find.textContaining('why three groups of four make twelve'),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.text('Not yet'));
+    await tester.pumpAndSettle();
+    expect(find.text('Let us use a different example.'), findsOneWidget);
   });
 
   testWidgets('learning report detail renders backend payload', (tester) async {
@@ -1447,7 +1498,11 @@ class _ExploreWorkspaceRepository extends _FakeWorkspaceRepository {
 }
 
 class _CheckpointWorkspaceRepository extends _FakeWorkspaceRepository {
+  _CheckpointWorkspaceRepository({this.failNextCheckpointStay = false});
+
   int advancePhaseCalls = 0;
+  final List<WorkspaceEvent> appendedEvents = [];
+  bool failNextCheckpointStay;
 
   WorkspaceSession _engageWorkspace({List<WorkspaceEvent>? events}) {
     return WorkspaceSession(
@@ -1495,6 +1550,12 @@ class _CheckpointWorkspaceRepository extends _FakeWorkspaceRepository {
     Map<String, dynamic> metadata = const {},
     String? imageAssetId,
   }) async {
+    if (metadata['interaction_type'] == 'phase_checkpoint' &&
+        metadata['checkpoint_decision'] == 'stay' &&
+        failNextCheckpointStay) {
+      failNextCheckpointStay = false;
+      throw const WorkspaceException('Temporary checkpoint sync failure.');
+    }
     final event = WorkspaceEvent(
       id: 'event-checkpoint',
       workspaceId: workspaceId,
@@ -1504,6 +1565,40 @@ class _CheckpointWorkspaceRepository extends _FakeWorkspaceRepository {
       textPayload: textPayload,
       metadata: metadata,
     );
+    appendedEvents.add(event);
+    if (metadata['interaction_type'] == 'phase_checkpoint' &&
+        metadata['checkpoint_decision'] == 'stay') {
+      const tutorEvent = WorkspaceEvent(
+        id: 'event-tutor-checkpoint-stay',
+        workspaceId: 'workspace-perkalian',
+        eventIndex: 2,
+        eventType: 'text',
+        actorType: 'tutor',
+        textPayload: 'Let us use a different example.',
+        metadata: {},
+      );
+      return WorkspaceAppendResult(
+        event: event,
+        tutorResponse: const WorkspaceTutorResponse(
+          text: 'Let us use a different example.',
+          intent: 'engage_probe',
+          nextActions: [],
+          nextPhaseReady: false,
+        ),
+        workspace: WorkspaceSession(
+          id: 'workspace-perkalian',
+          trackId: 'track-perkalian',
+          moduleId: 'module-perkalian',
+          currentTopic: 'Perkalian',
+          contentMode: 'chat',
+          status: 'active',
+          events: [event, tutorEvent],
+          currentPhase: 'engage',
+          phaseTransitionPending: false,
+          posttestEligible: false,
+        ),
+      );
+    }
     const tutorEvent = WorkspaceEvent(
       id: 'event-tutor-checkpoint-updated',
       workspaceId: 'workspace-perkalian',
