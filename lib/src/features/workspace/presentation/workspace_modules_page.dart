@@ -332,7 +332,6 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
           if (status.isReady) {
             await _refreshWorkspaceAfterReady();
           }
-          _scrollToBottom();
           return;
         }
       } on WorkspaceException catch (error) {
@@ -556,6 +555,9 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
       }
       setState(() {
         _workspace = updated;
+        _chatEntries
+          ..clear()
+          ..addAll(_entriesFromEvents(updated.events));
         _isPhaseSubmitting = false;
         _declinedPhaseTransition = null;
       });
@@ -966,35 +968,6 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     _scrollToBottom();
   }
 
-  Future<void> _startLearningChat() async {
-    if (_chatEntries.isNotEmpty) {
-      return;
-    }
-    if (_isLoadingWorkspace || _workspace == null) {
-      setState(() {
-        _workspaceError = _workspaceMaterial.chatLoadingMessage;
-      });
-      return;
-    }
-
-    final workspaceTitle = _workspace?.currentTopic.trim() ?? '';
-    final topic = workspaceTitle.isNotEmpty
-        ? workspaceTitle
-        : _workspaceMaterial.topicTitle;
-    final message = _normalizedLanguageCode() == 'id'
-        ? 'Saya siap mulai belajar $topic.'
-        : "I'm ready to start learning $topic.";
-    setState(() {
-      _chatEntries.add(_WorkspaceChatEntry.text(text: message, isUser: true));
-    });
-    await _appendWorkspaceEvent(
-      eventType: 'text',
-      textPayload: message,
-      metadata: const {'triggered_by': 'workspace_start_chat_button'},
-    );
-    _scrollToBottom();
-  }
-
   Future<bool> _appendWorkspaceEvent({
     required String eventType,
     String textPayload = '',
@@ -1393,9 +1366,6 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
                                     _generateVideo(suggestion: suggestion),
                                   );
                                 },
-                                onStartChat: () {
-                                  unawaited(_startLearningChat());
-                                },
                                 onOpenCanvas: _openCanvas,
                               ),
                             ),
@@ -1531,18 +1501,6 @@ class _LocalizedWorkspaceMaterial {
 
   String get topicTitle =>
       _t('topicTitle', en: 'Learning topic', id: 'Topik pembelajaran');
-  String get startChatTitle =>
-      _t('startChatTitle', en: 'Start learning', id: 'Mulai sesi belajar');
-  String get startChatBody => _t(
-    'startChatBody',
-    en: 'The tutor will guide you from the diagnosis and learning phase stored by the backend.',
-    id: 'Tutor akan memandu dari diagnosis dan fase belajar yang tersimpan di backend.',
-  );
-  String get startChatButtonLabel => _t(
-    'startChatButtonLabel',
-    en: 'Start learning chat',
-    id: 'Mulai chat belajar',
-  );
   String get loadingDescription => _t(
     'loadingDescription',
     en: 'Connecting this module to the backend learning context.',
@@ -1808,8 +1766,6 @@ class _LocalizedWorkspaceMaterial {
     en: 'Evidence requested',
     id: 'Bukti yang diminta',
   );
-  String get nextActionsLabel =>
-      _t('nextActionsLabel', en: 'Next actions', id: 'Aksi berikutnya');
 
   String canvasSnapshotSentLabel(Object? count) {
     if (count == null) {
@@ -2015,7 +1971,6 @@ class _WorkspaceChatPanel extends StatelessWidget {
     required this.canGenerateVideo,
     required this.onGenerateVideo,
     required this.onAcceptToolSuggestion,
-    required this.onStartChat,
     required this.onOpenCanvas,
     required this.tutorDegraded,
     required this.hintLevel,
@@ -2045,7 +2000,6 @@ class _WorkspaceChatPanel extends StatelessWidget {
   final bool canGenerateVideo;
   final VoidCallback onGenerateVideo;
   final ValueChanged<WorkspaceToolSuggestion> onAcceptToolSuggestion;
-  final VoidCallback onStartChat;
   final VoidCallback onOpenCanvas;
   final bool tutorDegraded;
   final int hintLevel;
@@ -2100,15 +2054,6 @@ class _WorkspaceChatPanel extends StatelessWidget {
             _WorkspaceSyncNotice(
               icon: Icons.sync_rounded,
               text: material.savingEvidenceMessage,
-            ),
-          ],
-          if (!isLoadingWorkspace &&
-              workspaceError == null &&
-              chatEntries.isEmpty) ...[
-            const SizedBox(height: 14),
-            _WorkspaceStartChatCard(
-              material: material,
-              onStartChat: onStartChat,
             ),
           ],
           const SizedBox(height: 14),
@@ -2172,7 +2117,6 @@ class _WorkspaceChatPanel extends StatelessWidget {
                       _StructuredTutorData(
                         explanationCard: entry.explanationCard,
                         evidenceRequest: entry.evidenceRequest,
-                        nextActions: entry.nextActions,
                         toolSuggestion: entry.toolSuggestion,
                         canAcceptToolSuggestion:
                             canGenerateVideo && !isVideoGenerating,
@@ -2683,7 +2627,6 @@ class _StructuredTutorData extends StatelessWidget {
   const _StructuredTutorData({
     required this.explanationCard,
     required this.evidenceRequest,
-    required this.nextActions,
     required this.toolSuggestion,
     required this.canAcceptToolSuggestion,
     required this.onAcceptToolSuggestion,
@@ -2692,7 +2635,6 @@ class _StructuredTutorData extends StatelessWidget {
 
   final Map<String, dynamic>? explanationCard;
   final Map<String, dynamic>? evidenceRequest;
-  final List<String> nextActions;
   final WorkspaceToolSuggestion? toolSuggestion;
   final bool canAcceptToolSuggestion;
   final ValueChanged<WorkspaceToolSuggestion> onAcceptToolSuggestion;
@@ -2721,11 +2663,7 @@ class _StructuredTutorData extends StatelessWidget {
             color: WicaraColors.secondary,
           ),
         if ((hasExplanationCard || hasEvidenceRequest) &&
-            nextActions.isNotEmpty)
-          const SizedBox(height: 8),
-        if (nextActions.isNotEmpty)
-          _TutorNextActions(actions: nextActions, material: material),
-        if (nextActions.isNotEmpty && toolSuggestion != null)
+            toolSuggestion != null)
           const SizedBox(height: 8),
         if (toolSuggestion case final suggestion?)
           _TutorToolSuggestionCard(
@@ -2907,46 +2845,6 @@ class _StructuredTutorValue extends StatelessWidget {
         fontWeight: FontWeight.w600,
         height: 1.35,
       ),
-    );
-  }
-}
-
-class _TutorNextActions extends StatelessWidget {
-  const _TutorNextActions({required this.actions, required this.material});
-
-  final List<String> actions;
-  final _LocalizedWorkspaceMaterial material;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          material.nextActionsLabel,
-          style: Theme.of(context).textTheme.labelMedium?.copyWith(
-            color: WicaraColors.secondaryDeep,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-        const SizedBox(height: 6),
-        Wrap(
-          spacing: 6,
-          runSpacing: 6,
-          children: [
-            for (final action in actions)
-              Chip(
-                avatar: const Icon(Icons.arrow_forward_rounded, size: 15),
-                label: Text(action),
-                backgroundColor: WicaraColors.secondarySoft,
-                side: BorderSide(
-                  color: WicaraColors.secondary.withValues(alpha: 0.24),
-                ),
-                visualDensity: VisualDensity.compact,
-              ),
-          ],
-        ),
-      ],
     );
   }
 }
@@ -3982,43 +3880,6 @@ class _GeneratedVideoChip extends StatelessWidget {
           fontSize: 10,
           fontWeight: FontWeight.w700,
         ),
-      ),
-    );
-  }
-}
-
-class _WorkspaceStartChatCard extends StatelessWidget {
-  const _WorkspaceStartChatCard({
-    required this.material,
-    required this.onStartChat,
-  });
-
-  final _LocalizedWorkspaceMaterial material;
-  final VoidCallback onStartChat;
-
-  @override
-  Widget build(BuildContext context) {
-    return _WorkspaceRichBubble(
-      icon: Icons.auto_awesome_rounded,
-      title: material.startChatTitle,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            material.startChatBody,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: WicaraColors.text,
-              fontWeight: FontWeight.w600,
-              height: 1.35,
-            ),
-          ),
-          const SizedBox(height: 12),
-          FilledButton.icon(
-            onPressed: onStartChat,
-            icon: const Icon(Icons.chat_bubble_outline_rounded),
-            label: Text(material.startChatButtonLabel),
-          ),
-        ],
       ),
     );
   }

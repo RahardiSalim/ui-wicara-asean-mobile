@@ -203,7 +203,7 @@ void main() {
     await tester.pumpWidget(
       await _buildSignedInTestApp(
         homeRepository: homeRepository,
-        workspaceRepository: const _FakeWorkspaceRepository(),
+        workspaceRepository: const _EligibleWorkspaceRepository(),
         educationLevel: 'elementary',
         gradeLevel: '4',
       ),
@@ -216,11 +216,7 @@ void main() {
 
     expect(find.text('Long explanation'), findsNothing);
     expect(find.text('Sudden check'), findsNothing);
-    expect(find.text('Start learning chat'), findsOneWidget);
     expect(find.text('Check understanding'), findsNothing);
-
-    await tester.tap(find.text('Start learning chat'));
-    await tester.pumpAndSettle();
 
     await tester.ensureVisible(find.text('Start Posttest'));
     await tester.tap(find.text('Start Posttest'));
@@ -297,8 +293,6 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.tap(find.text('Continue session'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Start learning chat'));
     await tester.pumpAndSettle();
     await tester.ensureVisible(find.text('Start Posttest'));
     await tester.tap(find.text('Start Posttest'));
@@ -1641,6 +1635,27 @@ class _AsyncPosttestWorkspaceRepository extends _FakeWorkspaceRepository {
   int fetchWorkspaceCalls = 0;
 
   @override
+  Future<WorkspaceSession> createOrResumeWorkspace({
+    required String trackId,
+    required String moduleId,
+    String? workspaceSessionId,
+    bool startNewSession = false,
+  }) async {
+    return const WorkspaceSession(
+      id: 'workspace-perkalian',
+      trackId: 'track-perkalian',
+      moduleId: 'module-perkalian',
+      currentTopic: 'Perkalian',
+      contentMode: 'chat',
+      status: 'active',
+      events: [],
+      currentPhase: 'evaluate',
+      phaseTransitionPending: false,
+      posttestEligible: true,
+    );
+  }
+
+  @override
   Future<WorkspaceSession> startPosttest({required String workspaceId}) async {
     return const WorkspaceSession(
       id: 'workspace-perkalian',
@@ -1681,6 +1696,31 @@ class _AsyncPosttestWorkspaceRepository extends _FakeWorkspaceRepository {
         posttestSessionId: 'posttest-widget-test',
         questionCount: 10,
       ),
+    );
+  }
+}
+
+class _EligibleWorkspaceRepository extends _FakeWorkspaceRepository {
+  const _EligibleWorkspaceRepository();
+
+  @override
+  Future<WorkspaceSession> createOrResumeWorkspace({
+    required String trackId,
+    required String moduleId,
+    String? workspaceSessionId,
+    bool startNewSession = false,
+  }) async {
+    return const WorkspaceSession(
+      id: 'workspace-perkalian',
+      trackId: 'track-perkalian',
+      moduleId: 'module-perkalian',
+      currentTopic: 'Perkalian',
+      contentMode: 'chat',
+      status: 'active',
+      events: [],
+      currentPhase: 'evaluate',
+      phaseTransitionPending: false,
+      posttestEligible: true,
     );
   }
 }
