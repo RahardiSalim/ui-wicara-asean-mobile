@@ -1446,10 +1446,7 @@ class _WorkspaceChatEntry {
 
   bool get isCanvas => snapshot != null;
   bool get hasStructuredTutorData =>
-      nextActions.isNotEmpty ||
-      (evidenceRequest?.isNotEmpty ?? false) ||
-      (explanationCard?.isNotEmpty ?? false) ||
-      toolSuggestion != null;
+      (explanationCard?.isNotEmpty ?? false) || toolSuggestion != null;
 }
 
 class _LocalizedWorkspaceMaterial {
@@ -2116,7 +2113,6 @@ class _WorkspaceChatPanel extends StatelessWidget {
                       const SizedBox(height: 8),
                       _StructuredTutorData(
                         explanationCard: entry.explanationCard,
-                        evidenceRequest: entry.evidenceRequest,
                         toolSuggestion: entry.toolSuggestion,
                         canAcceptToolSuggestion:
                             canGenerateVideo && !isVideoGenerating,
@@ -2626,7 +2622,6 @@ class _WorkspaceBubble extends StatelessWidget {
 class _StructuredTutorData extends StatelessWidget {
   const _StructuredTutorData({
     required this.explanationCard,
-    required this.evidenceRequest,
     required this.toolSuggestion,
     required this.canAcceptToolSuggestion,
     required this.onAcceptToolSuggestion,
@@ -2634,7 +2629,6 @@ class _StructuredTutorData extends StatelessWidget {
   });
 
   final Map<String, dynamic>? explanationCard;
-  final Map<String, dynamic>? evidenceRequest;
   final WorkspaceToolSuggestion? toolSuggestion;
   final bool canAcceptToolSuggestion;
   final ValueChanged<WorkspaceToolSuggestion> onAcceptToolSuggestion;
@@ -2643,7 +2637,6 @@ class _StructuredTutorData extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasExplanationCard = explanationCard?.isNotEmpty ?? false;
-    final hasEvidenceRequest = evidenceRequest?.isNotEmpty ?? false;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -2654,16 +2647,7 @@ class _StructuredTutorData extends StatelessWidget {
             data: explanationCard!,
             color: WicaraColors.primary,
           ),
-        if (hasExplanationCard && hasEvidenceRequest) const SizedBox(height: 8),
-        if (hasEvidenceRequest)
-          _StructuredTutorCard(
-            icon: Icons.fact_check_outlined,
-            title: material.evidenceRequestLabel,
-            data: evidenceRequest!,
-            color: WicaraColors.secondary,
-          ),
-        if ((hasExplanationCard || hasEvidenceRequest) &&
-            toolSuggestion != null)
+        if (hasExplanationCard && toolSuggestion != null)
           const SizedBox(height: 8),
         if (toolSuggestion case final suggestion?)
           _TutorToolSuggestionCard(

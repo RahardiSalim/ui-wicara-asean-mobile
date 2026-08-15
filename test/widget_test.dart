@@ -217,6 +217,9 @@ void main() {
     expect(find.text('Long explanation'), findsNothing);
     expect(find.text('Sudden check'), findsNothing);
     expect(find.text('Check understanding'), findsNothing);
+    expect(find.text('Evidence requested'), findsNothing);
+    expect(find.text('micro_check'), findsNothing);
+    expect(find.text('expected_evidence'), findsNothing);
 
     await tester.ensureVisible(find.text('Start Posttest'));
     await tester.tap(find.text('Start Posttest'));
@@ -1513,6 +1516,11 @@ class _CheckpointWorkspaceRepository extends _FakeWorkspaceRepository {
               metadata: {
                 'phase_checkpoint_question':
                     'After arranging 3 × 4 into equal groups, are you confident why three groups of four make twelve?',
+                'evidence_request': {
+                  'type': 'micro_check',
+                  'prompt': 'Try one more example.',
+                  'expected_evidence': 'A correct explanation.',
+                },
               },
             ),
           ],
