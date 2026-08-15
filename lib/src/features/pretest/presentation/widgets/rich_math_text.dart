@@ -43,7 +43,7 @@ class RichMathText extends StatelessWidget {
 List<InlineSpan> _spans(String text, TextStyle baseStyle) {
   final spans = <InlineSpan>[];
   final formulaRegex = RegExp(
-    r'(\$\$.*?\$\$|\$.*?\$|\\\(.*?\\\)|\\\[.*?\\\]|\\begin\{(?:bmatrix|pmatrix|matrix|vmatrix|Vmatrix)\}.*?\\end\{(?:bmatrix|pmatrix|matrix|vmatrix|Vmatrix)\})',
+    r'(\$\$.*?\$\$|\$.*?\$|\\\(.*?\\\)|\\\[.*?\\\]|\\begin\{(?:bmatrix|pmatrix|matrix|vmatrix|Vmatrix)\}.*?\\end\{(?:bmatrix|pmatrix|matrix|vmatrix|Vmatrix)\}|(?:[A-Za-z][A-Za-z0-9]*|[0-9]+)\^(?:\{[^{}]+\}|[A-Za-z0-9()+\-]+))',
     dotAll: true,
   );
   var cursor = 0;
