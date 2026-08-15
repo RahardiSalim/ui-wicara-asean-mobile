@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/localization/wicara_copy_scope.dart';
 import '../../../core/theme/wicara_colors.dart';
+import '../../onboarding/domain/onboarding_copy.dart';
 import '../application/review_controller.dart';
 import '../domain/review_models.dart';
 import 'review_correction_sheet.dart';
@@ -38,28 +40,32 @@ class _ReviewItemDetailPageState extends State<ReviewItemDetailPage> {
     super.dispose();
   }
 
+  OnboardingCopy get _copy => WicaraCopyScope.read(context);
+
   Future<void> _approve() async {
+    final copy = _copy;
     final notes = await _promptText(
-      title: 'Approve this output',
-      hint: 'Optional note',
-      confirmLabel: 'Approve',
+      title: copy.approveThisOutputLabel,
+      hint: copy.optionalNoteHint,
+      confirmLabel: copy.approveLabel,
       required: false,
     );
     if (notes == null) return;
     final ok = await _controller.approve(widget.itemId, notes: notes);
-    _afterResolve(ok, 'Approved');
+    _afterResolve(ok, copy.approvedLabel);
   }
 
   Future<void> _reject() async {
+    final copy = _copy;
     final reason = await _promptText(
-      title: 'Reject this output',
-      hint: 'Why is it wrong? (required)',
-      confirmLabel: 'Reject',
+      title: copy.rejectThisOutputLabel,
+      hint: copy.whyIsItWrongHint,
+      confirmLabel: copy.rejectLabel,
       required: true,
     );
     if (reason == null) return;
     final ok = await _controller.reject(widget.itemId, reason: reason);
-    _afterResolve(ok, 'Rejected');
+    _afterResolve(ok, copy.rejectedLabel);
   }
 
   Future<void> _correct() async {
@@ -80,19 +86,19 @@ class _ReviewItemDetailPageState extends State<ReviewItemDetailPage> {
     );
     if (!mounted) return;
     if (ok) {
-      _snack('Correction saved');
+      _snack(_copy.correctionSavedLabel);
     } else {
-      _snack(_controller.actionError ?? 'Correction failed');
+      _snack(_controller.actionError ?? _copy.correctionFailedLabel);
     }
   }
 
   void _afterResolve(bool ok, String label) {
     if (!mounted) return;
     if (ok) {
-      _snack('$label · learners are unaffected in real time');
+      _snack(_copy.resolveSuccessLabel(label));
       Navigator.of(context).pop(true);
     } else {
-      _snack(_controller.actionError ?? '$label failed');
+      _snack(_controller.actionError ?? _copy.resolveFailureLabel(label));
     }
   }
 
@@ -123,13 +129,15 @@ class _ReviewItemDetailPageState extends State<ReviewItemDetailPage> {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('Cancel'),
+              child: Text(WicaraCopyScope.of(dialogContext).cancelLabel),
             ),
             FilledButton(
               onPressed: () {
                 final text = controller.text.trim();
                 if (required && text.isEmpty) return;
-                Navigator.of(dialogContext).pop(required ? text : controller.text.trim());
+                Navigator.of(
+                  dialogContext,
+                ).pop(required ? text : controller.text.trim());
               },
               child: Text(confirmLabel),
             ),
@@ -141,10 +149,11 @@ class _ReviewItemDetailPageState extends State<ReviewItemDetailPage> {
 
   @override
   Widget build(BuildContext context) {
+    final copy = WicaraCopyScope.of(context);
     return Scaffold(
       backgroundColor: WicaraColors.pageBackground,
       appBar: AppBar(
-        title: const Text('Review item'),
+        title: Text(copy.reviewItemLabel),
         backgroundColor: Colors.white,
         foregroundColor: WicaraColors.ink,
         elevation: 0,
@@ -161,27 +170,27 @@ class _ReviewItemDetailPageState extends State<ReviewItemDetailPage> {
               child: Padding(
                 padding: const EdgeInsets.all(24),
                 child: Text(
-                  _controller.detailError ?? 'Item not found.',
+                  _controller.detailError ?? copy.itemNotFoundLabel,
                   textAlign: TextAlign.center,
                   style: const TextStyle(color: WicaraColors.muted),
                 ),
               ),
             );
           }
-          return _detailBody(detail);
+          return _detailBody(copy, detail);
         },
       ),
       bottomNavigationBar: AnimatedBuilder(
         animation: _controller,
         builder: (context, _) {
           if (_controller.detail == null) return const SizedBox.shrink();
-          return _actionBar();
+          return _actionBar(copy);
         },
       ),
     );
   }
 
-  Widget _detailBody(ReviewItemDetail detail) {
+  Widget _detailBody(OnboardingCopy copy, ReviewItemDetail detail) {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
       children: [
@@ -207,17 +216,19 @@ class _ReviewItemDetailPageState extends State<ReviewItemDetailPage> {
           ],
         ),
         const SizedBox(height: 8),
-        _whyBanner(detail),
+        _whyBanner(copy, detail),
         const SizedBox(height: 8),
-        _artifactSection(detail),
+        _artifactSection(copy, detail),
         const SizedBox(height: 8),
-        _historySection(detail),
+        _historySection(copy, detail),
       ],
     );
   }
 
-  Widget _whyBanner(ReviewItemDetail detail) {
-    final reasons = detail.triggerReasons.map(reviewLabel).join(', ');
+  Widget _whyBanner(OnboardingCopy copy, ReviewItemDetail detail) {
+    final reasons = detail.triggerReasons
+        .map(copy.reviewArtifactLabel)
+        .join(', ');
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
@@ -226,13 +237,17 @@ class _ReviewItemDetailPageState extends State<ReviewItemDetailPage> {
       ),
       child: Row(
         children: [
-          const Icon(Icons.info_outline, size: 18, color: WicaraColors.primaryDeep),
+          const Icon(
+            Icons.info_outline,
+            size: 18,
+            color: WicaraColors.primaryDeep,
+          ),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
               reasons.isEmpty
-                  ? 'Flagged for review.'
-                  : 'Flagged because: $reasons',
+                  ? copy.flaggedForReviewLabel
+                  : copy.flaggedBecauseLabel(reasons),
               style: const TextStyle(color: WicaraColors.text, fontSize: 13),
             ),
           ),
@@ -241,33 +256,32 @@ class _ReviewItemDetailPageState extends State<ReviewItemDetailPage> {
     );
   }
 
-  Widget _artifactSection(ReviewItemDetail detail) {
+  Widget _artifactSection(OnboardingCopy copy, ReviewItemDetail detail) {
     final artifact = detail.artifact;
     if (artifact == null) {
-      return _card('Artifact', [
-        const Text(
-          'The underlying artifact could not be loaded (it may have been '
-          'removed). The review record is still available.',
-          style: TextStyle(color: WicaraColors.muted),
+      return _card(copy.artifactLabel, [
+        Text(
+          copy.artifactUnavailableLabel,
+          style: const TextStyle(color: WicaraColors.muted),
         ),
       ]);
     }
     return switch (detail.artifactType) {
-      'question' => _buildQuestion(artifact),
-      'diagnosis' => _buildDiagnosis(artifact),
-      'evaluation' => _buildEvaluation(artifact),
-      _ => _card('Artifact', [Text(artifact.toString())]),
+      'question' => _buildQuestion(copy, artifact),
+      'diagnosis' => _buildDiagnosis(copy, artifact),
+      'evaluation' => _buildEvaluation(copy, artifact),
+      _ => _card(copy.artifactLabel, [Text(artifact.toString())]),
     };
   }
 
-  Widget _buildQuestion(Map<String, dynamic> q) {
+  Widget _buildQuestion(OnboardingCopy copy, Map<String, dynamic> q) {
     final options = (q['options'] as List?) ?? const [];
-    return _card('Generated question', [
-      _kv('Prompt', q['prompt']?.toString() ?? ''),
+    return _card(copy.generatedQuestionLabel, [
+      _kv(copy.promptLabel, q['prompt']?.toString() ?? ''),
       if ((q['helper_text']?.toString() ?? '').isNotEmpty)
-        _kv('Helper', q['helper_text'].toString()),
+        _kv(copy.helperLabel, q['helper_text'].toString()),
       const SizedBox(height: 6),
-      const Text('Options', style: _labelStyle),
+      Text(copy.optionsLabel, style: _labelStyle),
       const SizedBox(height: 4),
       ...options.map((o) {
         final map = Map<String, dynamic>.from(o as Map);
@@ -280,7 +294,9 @@ class _ReviewItemDetailPageState extends State<ReviewItemDetailPage> {
               Icon(
                 isCorrect ? Icons.check_circle : Icons.radio_button_unchecked,
                 size: 18,
-                color: isCorrect ? WicaraColors.accentMint : WicaraColors.softMuted,
+                color: isCorrect
+                    ? WicaraColors.accentMint
+                    : WicaraColors.softMuted,
               ),
               const SizedBox(width: 8),
               Expanded(
@@ -298,54 +314,91 @@ class _ReviewItemDetailPageState extends State<ReviewItemDetailPage> {
       }),
       const SizedBox(height: 6),
       if ((q['expected_reasoning']?.toString() ?? '').isNotEmpty)
-        _kv('Expected reasoning', q['expected_reasoning'].toString()),
-      _kv('Generation source', q['generation_source']?.toString() ?? ''),
+        _kv(copy.expectedReasoningLabel, q['expected_reasoning'].toString()),
+      _kv(copy.generationSourceLabel, q['generation_source']?.toString() ?? ''),
     ]);
   }
 
-  Widget _buildDiagnosis(Map<String, dynamic> d) {
+  Widget _buildDiagnosis(OnboardingCopy copy, Map<String, dynamic> d) {
     final alternatives = (d['alternatives'] as List?) ?? const [];
-    return _card('Learning-goal diagnosis', [
-      _kv('Learner asked', d['raw_query']?.toString() ?? ''),
-      _kv('Subject', d['subject_code']?.toString() ?? ''),
-      _kv('Suggested concept id', d['suggested_concept_id']?.toString() ?? '(none)'),
-      _kv('Confidence', (d['confidence'] as num?)?.toStringAsFixed(2) ?? '—'),
-      _kv('Status', d['status']?.toString() ?? ''),
+    return _card(copy.learningGoalDiagnosisLabel, [
+      _kv(copy.learnerAskedLabel, d['raw_query']?.toString() ?? ''),
+      _kv(copy.subjectSingularLabel, d['subject_code']?.toString() ?? ''),
+      _kv(
+        copy.suggestedConceptIdLabel,
+        d['suggested_concept_id']?.toString() ?? copy.noneLabel,
+      ),
+      _kv(
+        copy.confidenceLabel,
+        (d['confidence'] as num?)?.toStringAsFixed(2) ?? '—',
+      ),
+      _kv(
+        copy.statusLabel,
+        copy.reviewArtifactLabel(d['status']?.toString() ?? ''),
+      ),
       if (alternatives.isNotEmpty)
-        _kv('Alternatives', '${alternatives.length} candidate(s)'),
-      _kv('Model', '${d['llm_provider'] ?? ''} / ${d['llm_model'] ?? ''}'),
+        _kv(
+          copy.alternativesLabel,
+          copy.candidateCountLabel(alternatives.length),
+        ),
+      _kv(
+        copy.modelLabel,
+        '${d['llm_provider'] ?? ''} / ${d['llm_model'] ?? ''}',
+      ),
     ]);
   }
 
-  Widget _buildEvaluation(Map<String, dynamic> e) {
-    return _card('Reasoning evaluation', [
-      _kv('Learner reasoning', e['typed_reasoning']?.toString() ?? '(none)'),
-      _kv('Correct?', e['is_correct'] == true ? 'Yes' : 'No'),
-      _kv('Answer score', (e['answer_score'] as num?)?.toStringAsFixed(2) ?? '—'),
-      _kv('Reasoning score', (e['reasoning_score'] as num?)?.toStringAsFixed(2) ?? '—'),
-      _kv('Evidence score', (e['evidence_score'] as num?)?.toStringAsFixed(2) ?? '—'),
-      _kv('Diagnostic signal', e['diagnostic_signal']?.toString() ?? ''),
+  Widget _buildEvaluation(OnboardingCopy copy, Map<String, dynamic> e) {
+    return _card(copy.reasoningEvaluationLabel, [
+      _kv(
+        copy.learnerReasoningLabel,
+        e['typed_reasoning']?.toString() ?? copy.noneLabel,
+      ),
+      _kv(
+        copy.isCorrectLabel,
+        e['is_correct'] == true ? copy.yesLabel : copy.noLabel,
+      ),
+      _kv(
+        copy.answerScoreLabel,
+        (e['answer_score'] as num?)?.toStringAsFixed(2) ?? '—',
+      ),
+      _kv(
+        copy.reasoningScoreLabel,
+        (e['reasoning_score'] as num?)?.toStringAsFixed(2) ?? '—',
+      ),
+      _kv(
+        copy.evidenceScoreLabel,
+        (e['evidence_score'] as num?)?.toStringAsFixed(2) ?? '—',
+      ),
+      _kv(copy.diagnosticSignalLabel, e['diagnostic_signal']?.toString() ?? ''),
     ]);
   }
 
-  Widget _historySection(ReviewItemDetail detail) {
+  Widget _historySection(OnboardingCopy copy, ReviewItemDetail detail) {
     if (detail.actions.isEmpty) {
       return const SizedBox.shrink();
     }
-    return _card('History', [
+    return _card(copy.historyLabel, [
       ...detail.actions.map((a) {
         return Padding(
           padding: const EdgeInsets.symmetric(vertical: 4),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Icon(Icons.history, size: 16, color: WicaraColors.softMuted),
+              const Icon(
+                Icons.history,
+                size: 16,
+                color: WicaraColors.softMuted,
+              ),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  '${reviewLabel(a.action)}'
+                  '${copy.reviewArtifactLabel(a.action)}'
                   '${a.notes.isNotEmpty ? ' — ${a.notes}' : ''}',
-                  style: const TextStyle(color: WicaraColors.text, fontSize: 13),
+                  style: const TextStyle(
+                    color: WicaraColors.text,
+                    fontSize: 13,
+                  ),
                 ),
               ),
             ],
@@ -355,7 +408,7 @@ class _ReviewItemDetailPageState extends State<ReviewItemDetailPage> {
     ]);
   }
 
-  Widget _actionBar() {
+  Widget _actionBar(OnboardingCopy copy) {
     final acting = _controller.isActing;
     return SafeArea(
       child: Container(
@@ -374,7 +427,7 @@ class _ReviewItemDetailPageState extends State<ReviewItemDetailPage> {
                   side: const BorderSide(color: WicaraColors.accentCoral),
                 ),
                 icon: const Icon(Icons.block, size: 18),
-                label: const Text('Reject'),
+                label: Text(copy.rejectLabel),
               ),
             ),
             const SizedBox(width: 8),
@@ -386,7 +439,7 @@ class _ReviewItemDetailPageState extends State<ReviewItemDetailPage> {
                   side: const BorderSide(color: WicaraColors.primaryDeep),
                 ),
                 icon: const Icon(Icons.edit_outlined, size: 18),
-                label: const Text('Correct'),
+                label: Text(copy.correctLabelAction),
               ),
             ),
             const SizedBox(width: 8),
@@ -397,7 +450,7 @@ class _ReviewItemDetailPageState extends State<ReviewItemDetailPage> {
                   backgroundColor: WicaraColors.accentMint,
                 ),
                 icon: const Icon(Icons.check, size: 18),
-                label: const Text('Approve'),
+                label: Text(copy.approveLabel),
               ),
             ),
           ],

@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
+import '../localization/wicara_copy_scope.dart';
+
 class HardcodedVideoPreview extends StatelessWidget {
   const HardcodedVideoPreview({
     required this.videoUrl,
@@ -65,9 +67,9 @@ class HardcodedVideoPreview extends StatelessWidget {
                     color: Colors.black.withValues(alpha: 0.45),
                     borderRadius: BorderRadius.circular(999),
                   ),
-                  child: const Text(
-                    'Tap to open',
-                    style: TextStyle(
+                  child: Text(
+                    WicaraCopyScope.of(context).tapToOpenLabel,
+                    style: const TextStyle(
                       color: Colors.white,
                       fontSize: 11,
                       fontWeight: FontWeight.w700,
@@ -193,7 +195,7 @@ class _HardcodedVideoNativePageState extends State<_HardcodedVideoNativePage> {
                 child: FilledButton.tonalIcon(
                   onPressed: _resetZoom,
                   icon: const Icon(Icons.center_focus_strong_rounded, size: 16),
-                  label: const Text('Reset zoom'),
+                  label: Text(WicaraCopyScope.of(context).resetZoomLabel),
                   style: FilledButton.styleFrom(
                     foregroundColor: Colors.white,
                     backgroundColor: Colors.black.withValues(alpha: 0.45),
@@ -221,7 +223,7 @@ class _HardcodedVideoNativePageState extends State<_HardcodedVideoNativePage> {
               ),
               const SizedBox(height: 10),
               Text(
-                'Video gagal dimuat. Coba ulang.',
+                WicaraCopyScope.of(context).videoFailedToLoadLabel,
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
                   color: Colors.white,
@@ -248,7 +250,7 @@ class _HardcodedVideoNativePageState extends State<_HardcodedVideoNativePage> {
                   _initializeController();
                 },
                 icon: const Icon(Icons.refresh_rounded),
-                label: const Text('Retry'),
+                label: Text(WicaraCopyScope.of(context).retryLabel),
               ),
             ],
           ),

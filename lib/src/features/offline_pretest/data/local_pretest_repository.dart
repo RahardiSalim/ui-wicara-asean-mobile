@@ -15,6 +15,7 @@ import '../domain/local_pretest_decision_engine.dart';
 import '../domain/local_pretest_diagnosis_service.dart';
 import '../domain/local_pretest_engine.dart';
 import '../domain/local_pretest_question_generator.dart';
+import '../../../core/localization/app_language.dart';
 
 class LocalPretestRepository implements PretestRepository {
   LocalPretestRepository({
@@ -33,7 +34,7 @@ class LocalPretestRepository implements PretestRepository {
     bool forceLocalForPilot = true,
     bool allowBackendFallback = false,
     int maxDepth = 2,
-    int maxQuestions = 3,
+    int maxQuestions = 10,
     int maxNodesVisited = 5,
   }) : _engine = LocalPretestEngine(
          localDatabase: localDatabase,
@@ -73,9 +74,7 @@ class LocalPretestRepository implements PretestRepository {
     required String filename,
     required String mimeType,
   }) {
-    throw const PretestException(
-      'Image evidence upload requires the backend pretest mode.',
-    );
+    throw PretestException(AppLanguage.copy.evidenceUploadNeedsBackendLabel);
   }
 
   @override

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/localization/wicara_copy_scope.dart';
 import '../../../core/theme/wicara_colors.dart';
 import '../domain/review_models.dart';
 
@@ -21,35 +22,33 @@ Future<bool> promptAndFlag({
   required String artifactType,
   required String artifactId,
 }) async {
+  final copy = WicaraCopyScope.read(context);
   final reason = await showDialog<String>(
     context: context,
     builder: (dialogContext) {
       final controller = TextEditingController();
       return AlertDialog(
-        title: const Text('Flag for a teacher'),
+        title: Text(copy.flagForTeacherLabel),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text(
-              'Tell us what looks wrong. A teacher will review it — your '
-              'learning continues either way.',
-              style: TextStyle(color: WicaraColors.muted, fontSize: 13),
+            Text(
+              copy.flagForTeacherDescription,
+              style: const TextStyle(color: WicaraColors.muted, fontSize: 13),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: controller,
               autofocus: true,
               maxLines: 3,
-              decoration: const InputDecoration(
-                hintText: 'e.g. the marked answer seems wrong',
-              ),
+              decoration: InputDecoration(hintText: copy.flagReasonHint),
             ),
           ],
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Cancel'),
+            child: Text(copy.cancelLabel),
           ),
           FilledButton(
             onPressed: () {
@@ -57,7 +56,7 @@ Future<bool> promptAndFlag({
               if (text.isEmpty) return;
               Navigator.of(dialogContext).pop(text);
             },
-            child: const Text('Send'),
+            child: Text(copy.sendLabel),
           ),
         ],
       );
@@ -74,18 +73,14 @@ Future<bool> promptAndFlag({
     if (context.mounted) {
       ScaffoldMessenger.of(context)
         ..clearSnackBars()
-        ..showSnackBar(
-          const SnackBar(content: Text('Sent to a teacher for review. Thanks!')),
-        );
+        ..showSnackBar(SnackBar(content: Text(copy.flagSentLabel)));
     }
     return true;
   } catch (_) {
     if (context.mounted) {
       ScaffoldMessenger.of(context)
         ..clearSnackBars()
-        ..showSnackBar(
-          const SnackBar(content: Text('Could not send the flag right now.')),
-        );
+        ..showSnackBar(SnackBar(content: Text(copy.flagFailedLabel)));
     }
     return false;
   }
@@ -140,9 +135,10 @@ class _FlagReviewButtonState extends State<FlagReviewButton> {
     if (!FlagReviewButton.canFlag(widget.repository, widget.artifactId)) {
       return const SizedBox.shrink();
     }
+    final copy = WicaraCopyScope.of(context);
     final icon = _flagged ? Icons.flag : Icons.outlined_flag;
     final color = _flagged ? WicaraColors.accentMint : WicaraColors.muted;
-    final label = _flagged ? 'Flagged' : 'Looks wrong?';
+    final label = _flagged ? copy.flaggedLabel : copy.looksWrongLabel;
 
     if (widget.compact) {
       return IconButton(

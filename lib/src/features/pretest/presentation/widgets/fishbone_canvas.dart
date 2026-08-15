@@ -4,7 +4,18 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 
+import '../../../../core/localization/wicara_copy_scope.dart';
+import '../../../onboarding/domain/onboarding_copy.dart';
+
 import '../../../../core/theme/wicara_colors.dart';
+
+enum _CanvasStatus {
+  draftEmpty,
+  unsavedSketch,
+  unsavedChanges,
+  sentToChat,
+  savedReadyToSend,
+}
 
 enum _CanvasTool { pen, hand, eraser, shape }
 
@@ -33,7 +44,9 @@ class CanvasWorkSnapshot {
 Future<Uint8List?> renderCanvasSnapshotPng(
   CanvasWorkSnapshot snapshot, {
   int maxEdgePx = 1080,
+  OnboardingCopy? copy,
 }) async {
+  final resolvedCopy = copy ?? OnboardingCopy.forLanguage('English');
   final sceneSize = snapshot.canvasSize == Size.zero
       ? const Size(360, 240)
       : snapshot.canvasSize;
@@ -54,6 +67,7 @@ Future<Uint8List?> renderCanvasSnapshotPng(
     panOffset: Offset.zero,
     sceneSize: sceneSize,
     previewShape: null,
+    copy: resolvedCopy,
   );
   painter.paint(canvas, outputSize);
   final picture = recorder.endRecording();
@@ -107,6 +121,7 @@ class CanvasWorkPreview extends StatelessWidget {
                 panOffset: panOffset,
                 sceneSize: snapshotSize,
                 previewShape: null,
+                copy: WicaraCopyScope.of(context),
               ),
               child: const SizedBox.expand(),
             );
@@ -285,17 +300,19 @@ class _FishboneCanvasState extends State<FishboneCanvas> {
       _savedSnapshot != null &&
       _sentVersion != _savedVersion;
 
-  String get _statusText {
+  _CanvasStatus get _status {
     if (!_hasCanvasContent) {
-      return 'Draft empty';
+      return _CanvasStatus.draftEmpty;
     }
     if (_hasUnsavedChanges) {
-      return _savedVersion == 0 ? 'Unsaved sketch' : 'Unsaved changes';
+      return _savedVersion == 0
+          ? _CanvasStatus.unsavedSketch
+          : _CanvasStatus.unsavedChanges;
     }
     if (_sentVersion == _savedVersion) {
-      return 'Sent to chat';
+      return _CanvasStatus.sentToChat;
     }
-    return 'Saved, ready to send';
+    return _CanvasStatus.savedReadyToSend;
   }
 
   void _setTool(_CanvasTool tool) {
@@ -574,13 +591,13 @@ class _FishboneCanvasState extends State<FishboneCanvas> {
             borderRadius: BorderRadius.circular(18),
           ),
           title: Text(
-            'Clear canvas?',
+            WicaraCopyScope.of(context).canvasClearTitle,
             style: Theme.of(
               context,
             ).textTheme.titleLarge?.copyWith(fontSize: 20, height: 1.15),
           ),
           content: Text(
-            'This removes the current sketch and attached paper note.',
+            WicaraCopyScope.of(context).canvasClearMessage,
             style: Theme.of(context).textTheme.bodyMedium?.copyWith(
               color: WicaraColors.muted,
               fontWeight: FontWeight.w600,
@@ -589,7 +606,7 @@ class _FishboneCanvasState extends State<FishboneCanvas> {
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Keep'),
+              child: Text(WicaraCopyScope.of(context).canvasKeepLabel),
             ),
             FilledButton(
               onPressed: () => Navigator.of(context).pop(true),
@@ -597,7 +614,7 @@ class _FishboneCanvasState extends State<FishboneCanvas> {
                 backgroundColor: WicaraColors.secondary,
                 foregroundColor: Colors.white,
               ),
-              child: const Text('Clear'),
+              child: Text(WicaraCopyScope.of(context).canvasClearShortLabel),
             ),
           ],
         );
@@ -734,7 +751,9 @@ class _FishboneCanvasState extends State<FishboneCanvas> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        widget.isLargePanel ? 'Canvas workspace' : 'Canvas',
+                        widget.isLargePanel
+                            ? WicaraCopyScope.of(context).canvasWorkspaceLabel
+                            : WicaraCopyScope.of(context).canvasLabel,
                         style: Theme.of(context).textTheme.titleMedium
                             ?.copyWith(
                               fontSize: widget.isLargePanel ? 17 : 15,
@@ -744,8 +763,8 @@ class _FishboneCanvasState extends State<FishboneCanvas> {
                       const SizedBox(height: 2),
                       Text(
                         widget.isLargePanel
-                            ? 'Use the larger workspace for diagrams and notes.'
-                            : 'Work through the reasoning before submitting.',
+                            ? WicaraCopyScope.of(context).canvasLargeHint
+                            : WicaraCopyScope.of(context).canvasSmallHint,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -759,8 +778,8 @@ class _FishboneCanvasState extends State<FishboneCanvas> {
                 if (widget.onOpenLargePanel != null)
                   IconButton(
                     tooltip: widget.isLargePanel
-                        ? 'Close panel'
-                        : 'Larger panel',
+                        ? WicaraCopyScope.of(context).canvasClosePanelLabel
+                        : WicaraCopyScope.of(context).canvasLargerPanelLabel,
                     onPressed: widget.onOpenLargePanel,
                     icon: Icon(
                       widget.isLargePanel
@@ -823,7 +842,7 @@ class _FishboneCanvasState extends State<FishboneCanvas> {
                 ],
                 const SizedBox(height: 8),
                 _CanvasCommitBar(
-                  statusText: _statusText,
+                  status: _status,
                   canSave: _canSave,
                   canSend: _canSend,
                   onSave: _saveWork,
@@ -889,6 +908,7 @@ class _FishboneCanvasState extends State<FishboneCanvas> {
                                       color: _selectedColor,
                                       strokeWidth: _selectedStrokeWidth,
                                     ),
+                              copy: WicaraCopyScope.of(context),
                             ),
                             child: const SizedBox.expand(),
                           ),
@@ -961,56 +981,58 @@ class _CanvasToolbar extends StatelessWidget {
           crossAxisAlignment: WrapCrossAlignment.start,
           children: [
             _ControlGroup(
-              title: 'View',
+              title: WicaraCopyScope.of(context).canvasViewSectionLabel,
               children: [
                 _CanvasIconButton(
                   icon: Icons.zoom_out_rounded,
-                  tooltip: 'Zoom out',
+                  tooltip: WicaraCopyScope.of(context).canvasZoomOutLabel,
                   onPressed: canZoomOut ? onZoomOut : null,
                 ),
                 _ZoomBadge(zoom: zoom),
                 _CanvasIconButton(
                   icon: Icons.zoom_in_rounded,
-                  tooltip: 'Zoom in',
+                  tooltip: WicaraCopyScope.of(context).canvasZoomInLabel,
                   onPressed: canZoomIn ? onZoomIn : null,
                 ),
                 _CanvasIconButton(
                   icon: Icons.center_focus_strong_outlined,
-                  tooltip: 'Reset view',
+                  tooltip: WicaraCopyScope.of(context).canvasResetViewLabel,
                   onPressed: onResetView,
                 ),
                 _CanvasIconButton(
                   icon: showGrid
                       ? Icons.grid_on_rounded
                       : Icons.grid_off_rounded,
-                  tooltip: showGrid ? 'Hide grid' : 'Show grid',
+                  tooltip: showGrid
+                      ? WicaraCopyScope.of(context).canvasHideGridLabel
+                      : WicaraCopyScope.of(context).canvasShowGridLabel,
                   isActive: showGrid,
                   onPressed: onToggleGrid,
                 ),
               ],
             ),
             _ControlGroup(
-              title: 'Edit',
+              title: WicaraCopyScope.of(context).canvasEditSectionLabel,
               children: [
                 _CanvasIconButton(
                   icon: Icons.undo_rounded,
-                  tooltip: 'Undo',
+                  tooltip: WicaraCopyScope.of(context).undoLabel,
                   onPressed: canUndo ? onUndo : null,
                 ),
                 _CanvasIconButton(
                   icon: Icons.redo_rounded,
-                  tooltip: 'Redo',
+                  tooltip: WicaraCopyScope.of(context).redoLabel,
                   onPressed: canRedo ? onRedo : null,
                 ),
                 _CanvasIconButton(
                   icon: Icons.delete_outline_rounded,
-                  tooltip: 'Clear canvas',
+                  tooltip: WicaraCopyScope.of(context).canvasClearLabel,
                   onPressed: canClear ? onClear : null,
                   activeColor: WicaraColors.accentCoral,
                 ),
                 _CanvasIconButton(
                   icon: Icons.upload_file_rounded,
-                  tooltip: 'Upload image',
+                  tooltip: WicaraCopyScope.of(context).canvasUploadImageLabel,
                   onPressed: onAttachImage,
                 ),
               ],
@@ -1059,8 +1081,8 @@ class _ModeControlGroup extends StatelessWidget {
               Expanded(
                 child: _ModeButton(
                   icon: Icons.edit_rounded,
-                  label: 'Pen',
-                  tooltip: 'Pen mode',
+                  label: WicaraCopyScope.of(context).canvasPenLabel,
+                  tooltip: WicaraCopyScope.of(context).canvasPenTooltip,
                   isActive: selectedTool == _CanvasTool.pen,
                   onPressed: () => onSelectTool(_CanvasTool.pen),
                 ),
@@ -1069,8 +1091,8 @@ class _ModeControlGroup extends StatelessWidget {
               Expanded(
                 child: _ModeButton(
                   icon: Icons.open_with_rounded,
-                  label: 'Hand',
-                  tooltip: 'Hand mode',
+                  label: WicaraCopyScope.of(context).canvasHandLabel,
+                  tooltip: WicaraCopyScope.of(context).canvasHandTooltip,
                   isActive: selectedTool == _CanvasTool.hand,
                   onPressed: () => onSelectTool(_CanvasTool.hand),
                 ),
@@ -1079,8 +1101,8 @@ class _ModeControlGroup extends StatelessWidget {
               Expanded(
                 child: _ModeButton(
                   icon: Icons.auto_fix_high_rounded,
-                  label: 'Erase',
-                  tooltip: 'Eraser mode',
+                  label: WicaraCopyScope.of(context).canvasEraseLabel,
+                  tooltip: WicaraCopyScope.of(context).canvasEraseTooltip,
                   isActive: selectedTool == _CanvasTool.eraser,
                   onPressed: () => onSelectTool(_CanvasTool.eraser),
                 ),
@@ -1089,8 +1111,8 @@ class _ModeControlGroup extends StatelessWidget {
               Expanded(
                 child: _ModeButton(
                   icon: Icons.category_outlined,
-                  label: 'Shape',
-                  tooltip: 'Shape helper',
+                  label: WicaraCopyScope.of(context).canvasShapeLabel,
+                  tooltip: WicaraCopyScope.of(context).canvasShapeTooltip,
                   isActive: selectedTool == _CanvasTool.shape,
                   onPressed: () => onSelectTool(_CanvasTool.shape),
                 ),
@@ -1368,7 +1390,9 @@ class _PenSizeButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Tooltip(
-      message: 'Pen size ${size.toStringAsFixed(1)}',
+      message: WicaraCopyScope.of(
+        context,
+      ).penSizeLabel(size.toStringAsFixed(1)),
       child: InkWell(
         onTap: onPressed,
         borderRadius: BorderRadius.circular(9),
@@ -1413,7 +1437,7 @@ class _ColorSwatchButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Tooltip(
-      message: 'Pen color',
+      message: WicaraCopyScope.of(context).penColorLabel,
       child: InkWell(
         onTap: onPressed,
         borderRadius: BorderRadius.circular(13),
@@ -1470,21 +1494,21 @@ class _ShapeOptionsBar extends StatelessWidget {
           const SizedBox(width: 9),
           _ShapeButton(
             icon: Icons.horizontal_rule_rounded,
-            tooltip: 'Line shape',
+            tooltip: WicaraCopyScope.of(context).canvasLineShapeLabel,
             isSelected: selectedShape == _CanvasShapeType.line,
             onPressed: () => onShapeChanged(_CanvasShapeType.line),
           ),
           const SizedBox(width: 7),
           _ShapeButton(
             icon: Icons.arrow_forward_rounded,
-            tooltip: 'Arrow shape',
+            tooltip: WicaraCopyScope.of(context).canvasArrowShapeLabel,
             isSelected: selectedShape == _CanvasShapeType.arrow,
             onPressed: () => onShapeChanged(_CanvasShapeType.arrow),
           ),
           const SizedBox(width: 7),
           _ShapeButton(
             icon: Icons.crop_square_rounded,
-            tooltip: 'Rectangle shape',
+            tooltip: WicaraCopyScope.of(context).canvasRectangleShapeLabel,
             isSelected: selectedShape == _CanvasShapeType.rectangle,
             onPressed: () => onShapeChanged(_CanvasShapeType.rectangle),
           ),
@@ -1538,14 +1562,14 @@ class _ShapeButton extends StatelessWidget {
 
 class _CanvasCommitBar extends StatelessWidget {
   const _CanvasCommitBar({
-    required this.statusText,
+    required this.status,
     required this.canSave,
     required this.canSend,
     required this.onSave,
     required this.onSend,
   });
 
-  final String statusText;
+  final _CanvasStatus status;
   final bool canSave;
   final bool canSend;
   final VoidCallback onSave;
@@ -1573,7 +1597,7 @@ class _CanvasCommitBar extends StatelessWidget {
               const SizedBox(width: 7),
               Expanded(
                 child: Text(
-                  statusText,
+                  WicaraCopyScope.of(context).canvasStatusLabel(status.name),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -1590,7 +1614,7 @@ class _CanvasCommitBar extends StatelessWidget {
               Expanded(
                 child: _CanvasActionButton(
                   icon: Icons.save_outlined,
-                  label: 'Save work',
+                  label: WicaraCopyScope.of(context).saveWorkLabel,
                   onPressed: canSave ? onSave : null,
                   isPrimary: true,
                 ),
@@ -1599,7 +1623,7 @@ class _CanvasCommitBar extends StatelessWidget {
               Expanded(
                 child: _CanvasActionButton(
                   icon: Icons.forum_outlined,
-                  label: 'Send to chat',
+                  label: WicaraCopyScope.of(context).sendToChatLabel,
                   onPressed: canSend ? onSend : null,
                 ),
               ),
@@ -1611,10 +1635,10 @@ class _CanvasCommitBar extends StatelessWidget {
   }
 
   Color get _statusColor {
-    if (statusText == 'Sent to chat') {
+    if (status == _CanvasStatus.sentToChat) {
       return WicaraColors.accentMint;
     }
-    if (statusText == 'Saved, ready to send') {
+    if (status == _CanvasStatus.savedReadyToSend) {
       return WicaraColors.secondary;
     }
     return WicaraColors.accentAmber;
@@ -1704,6 +1728,7 @@ class _WorkCanvasPainter extends CustomPainter {
     required this.panOffset,
     required this.sceneSize,
     required this.previewShape,
+    required this.copy,
   });
 
   final List<_CanvasElement> elements;
@@ -1713,6 +1738,7 @@ class _WorkCanvasPainter extends CustomPainter {
   final Offset panOffset;
   final Size? sceneSize;
   final _CanvasShape? previewShape;
+  final OnboardingCopy copy;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -1744,7 +1770,7 @@ class _WorkCanvasPainter extends CustomPainter {
       canvas.drawRRect(paperRect, paperPaint);
       _drawText(
         canvas,
-        'Paper work\nattached',
+        copy.canvasPaperAttachedLabel,
         Offset(sceneSize.width * 0.08 + 18, sceneSize.height * 0.12 + 24),
         WicaraColors.secondaryDeep,
       );
@@ -1753,7 +1779,7 @@ class _WorkCanvasPainter extends CustomPainter {
     if (elements.isEmpty && !hasAttachment && previewShape == null) {
       _drawText(
         canvas,
-        'Sketch formulas, diagrams, or working steps here.',
+        copy.canvasEmptyHintLabel,
         Offset(sceneSize.width * 0.10, sceneSize.height * 0.46),
         WicaraColors.softMuted,
         maxWidth: sceneSize.width * 0.80,

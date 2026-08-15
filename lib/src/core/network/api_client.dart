@@ -3,7 +3,10 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
+
 import 'package:http_parser/http_parser.dart';
+
+import '../localization/app_language.dart';
 
 class ApiClient {
   ApiClient({required this.baseUrl, http.Client? httpClient})
@@ -82,12 +85,10 @@ class ApiClient {
           .post(uri, headers: mergedHeaders, body: jsonEncode(body ?? const {}))
           .timeout(timeout);
     } on TimeoutException {
-      throw ApiClientException(
-        'The WICARA server took too long to respond. Please try again.',
-      );
+      throw ApiClientException(AppLanguage.copy.serverTimeoutLabel);
     } on http.ClientException catch (error) {
       throw ApiClientException(
-        'Cannot reach the WICARA server at $baseUrl. ${error.message}',
+        AppLanguage.copy.serverUnreachableLabel(baseUrl, error.message),
       );
     }
 
@@ -135,12 +136,10 @@ class ApiClient {
           .then(http.Response.fromStream)
           .timeout(timeout);
     } on TimeoutException {
-      throw ApiClientException(
-        'The WICARA server took too long to upload the image. Please try again.',
-      );
+      throw ApiClientException(AppLanguage.copy.uploadTimeoutLabel);
     } on http.ClientException catch (error) {
       throw ApiClientException(
-        'Cannot reach the WICARA server at $baseUrl. ${error.message}',
+        AppLanguage.copy.serverUnreachableLabel(baseUrl, error.message),
       );
     }
 
@@ -220,6 +219,27 @@ class ApiClient {
     }
 
     return decoded;
+  }
+
+  /// Sends a DELETE. Returns normally on any 2xx, including a 204 with no body.
+  Future<void> delete(
+    String path, {
+    Map<String, String>? queryParameters,
+    Map<String, String>? headers,
+  }) async {
+    final uri = Uri.parse(
+      baseUrl,
+    ).replace(path: path, queryParameters: queryParameters);
+    final mergedHeaders = <String, String>{..._buildHeaders(), ...?headers};
+    final response = await _httpClient
+        .delete(uri, headers: mergedHeaders)
+        .timeout(const Duration(seconds: 8));
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw ApiClientException(
+        _errorMessage(response, method: 'DELETE', uri: uri),
+      );
+    }
   }
 
   Map<String, String> _buildHeaders({bool includeJsonContentType = false}) {

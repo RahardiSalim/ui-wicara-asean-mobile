@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/localization/wicara_copy_scope.dart';
 import '../../../core/theme/wicara_colors.dart';
+import '../../onboarding/domain/onboarding_copy.dart';
 import '../application/review_controller.dart';
 import '../domain/review_models.dart';
 import 'review_widgets.dart';
@@ -35,10 +37,11 @@ class _ReviewMetricsPageState extends State<ReviewMetricsPage> {
 
   @override
   Widget build(BuildContext context) {
+    final copy = WicaraCopyScope.of(context);
     return Scaffold(
       backgroundColor: WicaraColors.pageBackground,
       appBar: AppBar(
-        title: const Text('Correction metrics'),
+        title: Text(copy.correctionMetricsLabel),
         backgroundColor: Colors.white,
         foregroundColor: WicaraColors.ink,
         elevation: 0,
@@ -55,7 +58,7 @@ class _ReviewMetricsPageState extends State<ReviewMetricsPage> {
               child: Padding(
                 padding: const EdgeInsets.all(24),
                 child: Text(
-                  _controller.metricsError ?? 'No metrics yet.',
+                  _controller.metricsError ?? copy.noMetricsYetLabel,
                   textAlign: TextAlign.center,
                   style: const TextStyle(color: WicaraColors.muted),
                 ),
@@ -67,15 +70,15 @@ class _ReviewMetricsPageState extends State<ReviewMetricsPage> {
             child: ListView(
               padding: const EdgeInsets.fromLTRB(16, 16, 16, 28),
               children: [
-                _headline(metrics),
+                _headline(copy, metrics),
                 const SizedBox(height: 12),
-                _smallStats(metrics),
+                _smallStats(copy, metrics),
                 const SizedBox(height: 16),
-                _byTypeSection(metrics),
+                _byTypeSection(copy, metrics),
                 const SizedBox(height: 16),
-                _triggerSection(metrics),
+                _triggerSection(copy, metrics),
                 const SizedBox(height: 16),
-                _timeSeriesSection(metrics),
+                _timeSeriesSection(copy, metrics),
               ],
             ),
           );
@@ -84,7 +87,7 @@ class _ReviewMetricsPageState extends State<ReviewMetricsPage> {
     );
   }
 
-  Widget _headline(ReviewMetrics m) {
+  Widget _headline(OnboardingCopy copy, ReviewMetrics m) {
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(20),
@@ -99,9 +102,12 @@ class _ReviewMetricsPageState extends State<ReviewMetricsPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Human correction rate',
-            style: TextStyle(color: Colors.white70, fontWeight: FontWeight.w600),
+          Text(
+            copy.humanCorrectionRateLabel,
+            style: const TextStyle(
+              color: Colors.white70,
+              fontWeight: FontWeight.w600,
+            ),
           ),
           const SizedBox(height: 6),
           Text(
@@ -113,7 +119,7 @@ class _ReviewMetricsPageState extends State<ReviewMetricsPage> {
             ),
           ),
           Text(
-            '${m.correctedTotal} corrected of ${m.reviewedTotal} reviewed',
+            copy.correctedOfReviewedLabel(m.correctedTotal, m.reviewedTotal),
             style: const TextStyle(color: Colors.white70),
           ),
         ],
@@ -121,26 +127,41 @@ class _ReviewMetricsPageState extends State<ReviewMetricsPage> {
     );
   }
 
-  Widget _smallStats(ReviewMetrics m) {
+  Widget _smallStats(OnboardingCopy copy, ReviewMetrics m) {
     return Row(
       children: [
-        _statCard('Approved', _pct(m.approvalRate), WicaraColors.accentMint),
-        const SizedBox(width: 10),
-        _statCard('Rejected', _pct(m.rejectionRate), WicaraColors.accentCoral),
+        _statCard(
+          copy.approvedLabel,
+          _pct(m.approvalRate),
+          WicaraColors.accentMint,
+        ),
         const SizedBox(width: 10),
         _statCard(
-          'Backlog',
+          copy.rejectedLabel,
+          _pct(m.rejectionRate),
+          WicaraColors.accentCoral,
+        ),
+        const SizedBox(width: 10),
+        _statCard(
+          copy.backlogLabel,
           '${m.backlogOpen}',
           WicaraColors.accentAmber,
           subtitle: m.backlogOldestAgeDays != null
-              ? 'oldest ${m.backlogOldestAgeDays!.toStringAsFixed(1)}d'
-              : 'none open',
+              ? copy.oldestBacklogLabel(
+                  m.backlogOldestAgeDays!.toStringAsFixed(1),
+                )
+              : copy.noneOpenLabel,
         ),
       ],
     );
   }
 
-  Widget _statCard(String label, String value, Color color, {String? subtitle}) {
+  Widget _statCard(
+    String label,
+    String value,
+    Color color, {
+    String? subtitle,
+  }) {
     return Expanded(
       child: Container(
         padding: const EdgeInsets.all(12),
@@ -168,7 +189,10 @@ class _ReviewMetricsPageState extends State<ReviewMetricsPage> {
             if (subtitle != null)
               Text(
                 subtitle,
-                style: const TextStyle(color: WicaraColors.softMuted, fontSize: 11),
+                style: const TextStyle(
+                  color: WicaraColors.softMuted,
+                  fontSize: 11,
+                ),
               ),
           ],
         ),
@@ -176,11 +200,13 @@ class _ReviewMetricsPageState extends State<ReviewMetricsPage> {
     );
   }
 
-  Widget _byTypeSection(ReviewMetrics m) {
-    return _card('Correction rate by type', [
+  Widget _byTypeSection(OnboardingCopy copy, ReviewMetrics m) {
+    return _card(copy.correctionRateByTypeLabel, [
       if (m.byType.isEmpty)
-        const Text('No reviewed items yet.',
-            style: TextStyle(color: WicaraColors.muted))
+        Text(
+          copy.noReviewedItemsLabel,
+          style: const TextStyle(color: WicaraColors.muted),
+        )
       else
         ...m.byType.map((t) {
           return Padding(
@@ -192,7 +218,7 @@ class _ReviewMetricsPageState extends State<ReviewMetricsPage> {
                   children: [
                     Expanded(
                       child: Text(
-                        reviewLabel(t.artifactType),
+                        copy.reviewArtifactLabel(t.artifactType),
                         style: const TextStyle(
                           color: WicaraColors.ink,
                           fontWeight: FontWeight.w700,
@@ -200,8 +226,11 @@ class _ReviewMetricsPageState extends State<ReviewMetricsPage> {
                       ),
                     ),
                     Text(
-                      '${_pct(t.correctionRate)} · ${t.reviewed} reviewed',
-                      style: const TextStyle(color: WicaraColors.muted, fontSize: 12),
+                      '${_pct(t.correctionRate)} · ${copy.reviewedCountLabel(t.reviewed)}',
+                      style: const TextStyle(
+                        color: WicaraColors.muted,
+                        fontSize: 12,
+                      ),
                     ),
                   ],
                 ),
@@ -212,7 +241,9 @@ class _ReviewMetricsPageState extends State<ReviewMetricsPage> {
                     value: t.correctionRate.clamp(0, 1),
                     minHeight: 8,
                     backgroundColor: WicaraColors.primarySoft,
-                    valueColor: const AlwaysStoppedAnimation(WicaraColors.primaryDeep),
+                    valueColor: const AlwaysStoppedAnimation(
+                      WicaraColors.primaryDeep,
+                    ),
                   ),
                 ),
               ],
@@ -222,17 +253,18 @@ class _ReviewMetricsPageState extends State<ReviewMetricsPage> {
     ]);
   }
 
-  Widget _triggerSection(ReviewMetrics m) {
-    return _card('Trigger precision', [
-      const Text(
-        'Of items a trigger flagged, how many turned out to need a fix '
-        '(corrected or rejected). Higher = the trigger is worth a teacher\'s time.',
-        style: TextStyle(color: WicaraColors.muted, fontSize: 12),
+  Widget _triggerSection(OnboardingCopy copy, ReviewMetrics m) {
+    return _card(copy.triggerPrecisionLabel, [
+      Text(
+        copy.triggerPrecisionDescription,
+        style: const TextStyle(color: WicaraColors.muted, fontSize: 12),
       ),
       const SizedBox(height: 8),
       if (m.triggerPrecision.isEmpty)
-        const Text('No resolved items yet.',
-            style: TextStyle(color: WicaraColors.muted))
+        Text(
+          copy.noResolvedItemsLabel,
+          style: const TextStyle(color: WicaraColors.muted),
+        )
       else
         ...m.triggerPrecision.map((t) {
           return Padding(
@@ -256,15 +288,17 @@ class _ReviewMetricsPageState extends State<ReviewMetricsPage> {
     ]);
   }
 
-  Widget _timeSeriesSection(ReviewMetrics m) {
+  Widget _timeSeriesSection(OnboardingCopy copy, ReviewMetrics m) {
     final maxReviewed = m.timeSeries.fold<int>(
       1,
       (acc, p) => p.reviewed > acc ? p.reviewed : acc,
     );
-    return _card('Last 14 days', [
+    return _card(copy.lastFourteenDaysLabel, [
       if (m.timeSeries.isEmpty)
-        const Text('No activity in the last 14 days.',
-            style: TextStyle(color: WicaraColors.muted))
+        Text(
+          copy.noActivityFourteenDaysLabel,
+          style: const TextStyle(color: WicaraColors.muted),
+        )
       else
         ...m.timeSeries.map((p) {
           return Padding(
@@ -275,7 +309,10 @@ class _ReviewMetricsPageState extends State<ReviewMetricsPage> {
                   width: 78,
                   child: Text(
                     p.date,
-                    style: const TextStyle(color: WicaraColors.muted, fontSize: 11),
+                    style: const TextStyle(
+                      color: WicaraColors.muted,
+                      fontSize: 11,
+                    ),
                   ),
                 ),
                 Expanded(
@@ -286,11 +323,17 @@ class _ReviewMetricsPageState extends State<ReviewMetricsPage> {
                         Container(height: 14, color: WicaraColors.primarySoft),
                         FractionallySizedBox(
                           widthFactor: (p.reviewed / maxReviewed).clamp(0, 1),
-                          child: Container(height: 14, color: WicaraColors.primaryLight),
+                          child: Container(
+                            height: 14,
+                            color: WicaraColors.primaryLight,
+                          ),
                         ),
                         FractionallySizedBox(
                           widthFactor: (p.corrected / maxReviewed).clamp(0, 1),
-                          child: Container(height: 14, color: WicaraColors.primaryDeep),
+                          child: Container(
+                            height: 14,
+                            color: WicaraColors.primaryDeep,
+                          ),
                         ),
                       ],
                     ),
@@ -299,16 +342,19 @@ class _ReviewMetricsPageState extends State<ReviewMetricsPage> {
                 const SizedBox(width: 8),
                 Text(
                   '${p.corrected}/${p.reviewed}',
-                  style: const TextStyle(color: WicaraColors.text, fontSize: 11),
+                  style: const TextStyle(
+                    color: WicaraColors.text,
+                    fontSize: 11,
+                  ),
                 ),
               ],
             ),
           );
         }),
       const SizedBox(height: 6),
-      const Text(
-        'Dark = corrected · light = reviewed',
-        style: TextStyle(color: WicaraColors.softMuted, fontSize: 11),
+      Text(
+        copy.darkCorrectedLightReviewedLabel,
+        style: const TextStyle(color: WicaraColors.softMuted, fontSize: 11),
       ),
     ]);
   }

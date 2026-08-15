@@ -1,6 +1,7 @@
 import '../../pretest/data/pretest_session_store.dart';
 import '../domain/learning_goal_repository.dart';
 import '../../offline_learning/data/local_curriculum_repository.dart';
+import '../../../core/localization/app_language.dart';
 
 class LocalLearningGoalRepository implements LearningGoalRepository {
   LocalLearningGoalRepository({
@@ -58,7 +59,7 @@ class LocalLearningGoalRepository implements LearningGoalRepository {
   }) async {
     final query = rawQuery.trim();
     if (query.isEmpty) {
-      throw const LearningGoalException('Topik belajar tidak boleh kosong.');
+      throw LearningGoalException(AppLanguage.copy.emptyTopicLabel);
     }
     final ranked = await _searchRankedConcepts(
       query: query,
@@ -70,8 +71,7 @@ class LocalLearningGoalRepository implements LearningGoalRepository {
         status: 'needs_clarification',
         confidence: 0,
         suggestedConcept: null,
-        clarificationQuestion:
-            'Belum ketemu konsep yang pas. Coba tambahkan kata kunci yang lebih spesifik.',
+        clarificationQuestion: AppLanguage.copy.noMatchingConceptLabel,
       );
       _resolutionCache[emptyResolution.resolutionId] = emptyResolution;
       return emptyResolution;
@@ -92,8 +92,8 @@ class LocalLearningGoalRepository implements LearningGoalRepository {
           ? 'all_subjects'
           : 'subject',
       searchScopeReason: (subjectCode ?? '').trim().isEmpty
-          ? 'Pencarian lintas semua subject lokal.'
-          : 'Pencarian dibatasi ke subject yang dipilih.',
+          ? AppLanguage.copy.searchAllSubjectsLabel
+          : AppLanguage.copy.searchLimitedSubjectLabel,
       graphFocusCodes: suggestions
           .take(5)
           .map((item) => item.conceptCode)
@@ -112,15 +112,11 @@ class LocalLearningGoalRepository implements LearningGoalRepository {
   }) async {
     final resolution = _resolutionCache[resolutionId];
     if (resolution == null) {
-      throw const LearningGoalException(
-        'Resolution tidak ditemukan. Cari node goal lagi.',
-      );
+      throw LearningGoalException(AppLanguage.copy.resolutionNotFoundLabel);
     }
     final selectedConcept = resolution.suggestedConcept;
     if (selectedConcept == null) {
-      throw const LearningGoalException(
-        'Belum ada node target yang dipilih untuk pretest.',
-      );
+      throw LearningGoalException(AppLanguage.copy.noTargetNodeLabel);
     }
     final existing = await fetchActiveGoal();
     if (existing != null && existing.id.isNotEmpty) {
@@ -164,7 +160,7 @@ class LocalLearningGoalRepository implements LearningGoalRepository {
   }) async {
     final resolution = _resolutionCache[resolutionId];
     if (resolution == null) {
-      throw const LearningGoalException('Resolution tidak ditemukan.');
+      throw LearningGoalException(AppLanguage.copy.resolutionMissingLabel);
     }
     final suggestions = <LearningConceptSuggestion>[
       if (resolution.suggestedConcept != null) resolution.suggestedConcept!,
@@ -200,7 +196,7 @@ class LocalLearningGoalRepository implements LearningGoalRepository {
     if (resolution.suggestedConcept == null) {
       throw LearningGoalException(
         resolution.clarificationQuestion ??
-            'Belum ketemu konsep yang tepat. Coba query lain.',
+            AppLanguage.copy.noMatchingConceptRetryLabel,
       );
     }
     return confirmResolvedGoal(
@@ -236,9 +232,7 @@ class LocalLearningGoalRepository implements LearningGoalRepository {
       concepts = await _localCurriculumRepository.listConcepts();
     }
     if (concepts.isEmpty) {
-      throw const LearningGoalException(
-        'Kurikulum lokal belum tersedia. Coba sync kurikulum dulu.',
-      );
+      throw LearningGoalException(AppLanguage.copy.localCurriculumMissingLabel);
     }
 
     final normalizedId = (conceptId ?? '').trim().toLowerCase();
@@ -265,7 +259,7 @@ class LocalLearningGoalRepository implements LearningGoalRepository {
             ? normalizedCode
             : normalizedId;
         throw LearningGoalException(
-          'Node "$targetRef" tidak ditemukan di kurikulum lokal.',
+          AppLanguage.copy.localNodeNotFoundLabel(targetRef),
         );
       }
     }

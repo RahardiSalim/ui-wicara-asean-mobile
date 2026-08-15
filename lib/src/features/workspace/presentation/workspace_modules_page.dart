@@ -1,8 +1,12 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
+
+import '../../../core/localization/wicara_copy_scope.dart';
 
 import '../../../core/accessibility/speech_accessibility_scope.dart';
 import '../../../core/network/api_client.dart';
@@ -11,6 +15,8 @@ import '../../../core/widgets/speech_controls.dart';
 import '../../home/domain/home_repository.dart';
 import '../../home/domain/home_snapshot.dart';
 import '../../onboarding/application/onboarding_controller.dart';
+import '../../onboarding/domain/copy_translations.dart';
+import '../../onboarding/domain/language_codes.dart';
 import '../../onboarding/domain/onboarding_copy.dart';
 import '../../pretest/presentation/widgets/rich_math_text.dart';
 import '../../pretest/presentation/widgets/fishbone_canvas.dart';
@@ -48,6 +54,8 @@ class WorkspaceModulesPage extends StatefulWidget {
 class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
   static const _videoPollingInterval = Duration(seconds: 3);
   static const _videoPollingTimeout = Duration(minutes: 5);
+  static const _posttestPollingInterval = Duration(seconds: 3);
+  static const _posttestPollingTimeout = Duration(minutes: 10);
 
   final _messageController = TextEditingController();
   final _scrollController = ScrollController();
@@ -67,9 +75,19 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
   String? _videoStatusMessage;
   String? _videoErrorMessage;
   bool _isWorkspaceHeaderExpanded = false;
-  List<WorkspaceSessionSummary> _sessionHistory = const [];
-  String? _activeSessionId;
   int _workspaceRequestSerial = 0;
+  WorkspaceTutorResponse? _lastTutorResponse;
+  WorkspaceMasteryUpdate? _lastMasteryUpdate;
+  String? _activeVideoJobId;
+  bool _stopPosttestPolling = false;
+  String? _activePosttestPollingWorkspaceId;
+  String? _declinedPhaseTransition;
+  Uint8List? _pendingAttachmentBytes;
+  String? _pendingAttachmentAssetId;
+  String? _pendingAttachmentName;
+  String? _pendingAttachmentMimeType;
+  CanvasWorkSnapshot? _pendingCanvasSnapshot;
+  bool _isUploadingAttachment = false;
 
   /// Latest weekly report fetched from HomeRepository. Null while loading or
   /// if no HomeRepository was provided.
@@ -102,15 +120,13 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
   @override
   void dispose() {
     _stopVideoPolling = true;
+    _stopPosttestPolling = true;
     _messageController.dispose();
     _scrollController.dispose();
     super.dispose();
   }
 
-  Future<void> _loadWorkspace({
-    String? workspaceSessionId,
-    bool startNewSession = false,
-  }) async {
+  Future<void> _loadWorkspace() async {
     final requestSerial = ++_workspaceRequestSerial;
     final arguments = widget.routeArguments;
     if (arguments == null || !arguments.isValid) {
@@ -124,51 +140,51 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     setState(() {
       _isLoadingWorkspace = true;
       _workspaceError = null;
-      if (startNewSession || workspaceSessionId != null) {
-        _resetCurrentChatState(nextActiveSessionId: workspaceSessionId);
-      }
     });
     try {
       final storedHistory = widget.workspaceRepository.sessionHistory(
         trackId: arguments.trackId,
         moduleId: arguments.moduleId,
       );
-      final resolvedWorkspaceSessionId =
-          workspaceSessionId ??
-          (startNewSession ? null : storedHistory.activeWorkspaceId);
-      final workspace = await widget.workspaceRepository
-          .createOrResumeWorkspace(
-            trackId: arguments.trackId,
-            moduleId: arguments.moduleId,
-            workspaceSessionId: resolvedWorkspaceSessionId,
-            startNewSession: startNewSession,
-          );
+      WorkspaceSession workspace;
+      try {
+        workspace = await widget.workspaceRepository.createOrResumeWorkspace(
+          trackId: arguments.trackId,
+          moduleId: arguments.moduleId,
+          workspaceSessionId: storedHistory.activeWorkspaceId,
+        );
+      } on WorkspaceException {
+        // A cached id can outlive the session it points at (or belong to a
+        // previous account). Fall back to a fresh resume instead of dead-ending
+        // the learner on an error they cannot clear from inside the app.
+        if (storedHistory.activeWorkspaceId == null) {
+          rethrow;
+        }
+        await widget.workspaceRepository.clearCachedSession(
+          trackId: arguments.trackId,
+          moduleId: arguments.moduleId,
+        );
+        workspace = await widget.workspaceRepository.createOrResumeWorkspace(
+          trackId: arguments.trackId,
+          moduleId: arguments.moduleId,
+        );
+      }
       await widget.workspaceRepository.updateModuleState(
         trackId: arguments.trackId,
         moduleId: arguments.moduleId,
         status: 'active',
       );
-      var history = _sessionHistory;
-      try {
-        history = await widget.workspaceRepository.fetchSessionHistory(
-          trackId: arguments.trackId,
-          moduleId: arguments.moduleId,
-        );
-      } on WorkspaceException {
-        history = _sessionHistory;
-      }
       if (!mounted || requestSerial != _workspaceRequestSerial) return;
       setState(() {
         _workspace = workspace;
-        _activeSessionId = workspace.id;
         _chatEntries
           ..clear()
           ..addAll(_entriesFromEvents(workspace.events));
         _restoreLoadedVideoState(workspace);
-        _sessionHistory = history;
         _isLoadingWorkspace = false;
       });
       _resumePendingVideoPolling(workspace);
+      _resumePendingPosttestPolling(workspace);
       _scrollToBottom();
     } on WorkspaceException catch (error) {
       if (!mounted || requestSerial != _workspaceRequestSerial) return;
@@ -176,124 +192,6 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
         _isLoadingWorkspace = false;
         _workspaceError = error.message;
       });
-    }
-  }
-
-  Future<void> _startNewChatSession() async {
-    await _loadWorkspace(startNewSession: true);
-  }
-
-  Future<void> _switchToSession(String workspaceId) async {
-    final requestSerial = ++_workspaceRequestSerial;
-    final arguments = widget.routeArguments;
-    if (arguments == null || !arguments.isValid) {
-      return;
-    }
-    if (workspaceId == (_workspace?.id ?? '')) {
-      return;
-    }
-    setState(() {
-      _isLoadingWorkspace = true;
-      _workspaceError = null;
-      _resetCurrentChatState(nextActiveSessionId: workspaceId);
-    });
-    try {
-      final workspace = await widget.workspaceRepository.fetchWorkspace(
-        workspaceId,
-      );
-      await widget.workspaceRepository.setActiveSession(
-        trackId: arguments.trackId,
-        moduleId: arguments.moduleId,
-        workspaceId: workspaceId,
-      );
-      var history = _sessionHistory;
-      try {
-        history = await widget.workspaceRepository.fetchSessionHistory(
-          trackId: arguments.trackId,
-          moduleId: arguments.moduleId,
-        );
-      } on WorkspaceException {
-        history = _sessionHistory;
-      }
-      if (!mounted || requestSerial != _workspaceRequestSerial) {
-        return;
-      }
-      setState(() {
-        _workspace = workspace;
-        _activeSessionId = workspace.id;
-        _chatEntries
-          ..clear()
-          ..addAll(_entriesFromEvents(workspace.events));
-        _restoreLoadedVideoState(workspace);
-        _sessionHistory = history;
-        _isLoadingWorkspace = false;
-      });
-      _resumePendingVideoPolling(workspace);
-      _scrollToBottom();
-    } on WorkspaceException catch (error) {
-      if (!mounted || requestSerial != _workspaceRequestSerial) {
-        return;
-      }
-      setState(() {
-        _isLoadingWorkspace = false;
-        _workspaceError = error.message;
-      });
-    }
-  }
-
-  void _resetCurrentChatState({String? nextActiveSessionId}) {
-    _workspace = null;
-    _activeSessionId = nextActiveSessionId;
-    _isAppendingEvent = false;
-    _isPhaseSubmitting = false;
-    _isVideoGenerating = false;
-    _stopVideoPolling = true;
-    _chatEntries.clear();
-    _canvasSnapshots.clear();
-    _contentMode = _WorkspaceContentMode.choosing;
-    _latestVideoStatus = null;
-    _latestVideoArtifact = null;
-    _videoStatusMessage = null;
-    _videoErrorMessage = null;
-  }
-
-  Future<void> _openSessionHistorySheet() async {
-    final arguments = widget.routeArguments;
-    if (arguments == null || !arguments.isValid) {
-      return;
-    }
-    List<WorkspaceSessionSummary> sessions = _sessionHistory;
-    try {
-      sessions = await widget.workspaceRepository.fetchSessionHistory(
-        trackId: arguments.trackId,
-        moduleId: arguments.moduleId,
-      );
-      if (mounted) {
-        setState(() => _sessionHistory = sessions);
-      }
-    } on WorkspaceException catch (error) {
-      if (!mounted) {
-        return;
-      }
-      setState(() => _workspaceError = error.message);
-      return;
-    }
-    if (!mounted || sessions.isEmpty) {
-      return;
-    }
-    final selected = await showModalBottomSheet<String>(
-      context: context,
-      showDragHandle: true,
-      builder: (context) {
-        return _WorkspaceHistorySheet(
-          sessions: sessions,
-          activeSessionId: _activeSessionId,
-          material: _workspaceMaterial,
-        );
-      },
-    );
-    if (selected != null) {
-      await _switchToSession(selected);
     }
   }
 
@@ -366,6 +264,7 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
         _videoStatusMessage = _workspaceMaterial.videoQueuedMessage;
       });
 
+      _activeVideoJobId = result.queue.jobId;
       await _pollVideoStatus(jobId: result.queue.jobId);
     } on WorkspaceException catch (error) {
       if (!mounted) return;
@@ -389,6 +288,9 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
         setState(() {
           _isVideoGenerating = false;
           _contentMode = _WorkspaceContentMode.videoFailed;
+          // Keep the job id: the render usually lands after this, and the
+          // learner can re-attach instead of paying to generate it again.
+          _activeVideoJobId = jobId;
           _videoErrorMessage = _workspaceMaterial.videoTimedOutMessage(
             _videoPollingTimeout.inMinutes,
           );
@@ -426,6 +328,7 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
         _scrollToBottomIfNearBottom();
 
         if (status.isFinal) {
+          _activeVideoJobId = null;
           if (status.isReady) {
             await _refreshWorkspaceAfterReady();
           }
@@ -445,6 +348,37 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
 
       await Future<void>.delayed(_videoPollingInterval);
     }
+  }
+
+  /// Re-attaches to a render that was still running when polling stopped
+  /// (backgrounded app, session switch, or the 5-minute timeout).
+  Future<void> _resumeVideoPolling() async {
+    final jobId = _activeVideoJobId;
+    if (jobId == null || _isVideoGenerating) {
+      return;
+    }
+    setState(() {
+      _isVideoGenerating = true;
+      _contentMode = _WorkspaceContentMode.videoProcessing;
+      _videoErrorMessage = null;
+      _videoStatusMessage = _workspaceMaterial.resumingVideoMessage;
+    });
+    await _pollVideoStatus(jobId: jobId);
+  }
+
+  /// Records that the learner actually watched the render. Without this the
+  /// backend has no signal distinguishing a played video from an ignored one.
+  Future<void> _markVideoViewed(WorkspaceMediaArtifact artifact) async {
+    if (_isAppendingEvent || _workspace == null) {
+      return;
+    }
+    await _appendWorkspaceEvent(
+      eventType: 'media_viewed',
+      metadata: {
+        'media_artifact_id': artifact.id,
+        'triggered_by': 'workspace_video_playback',
+      },
+    );
   }
 
   Future<void> _refreshWorkspaceAfterReady() async {
@@ -611,6 +545,7 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     setState(() {
       _isPhaseSubmitting = true;
       _workspaceError = null;
+      _declinedPhaseTransition = null;
     });
     try {
       final updated = await widget.workspaceRepository.advancePhase(
@@ -619,25 +554,10 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
       if (!mounted || _workspace?.id != workspace.id) {
         return;
       }
-      final arguments = widget.routeArguments;
-      var history = _sessionHistory;
-      if (arguments != null && arguments.isValid) {
-        try {
-          history = await widget.workspaceRepository.fetchSessionHistory(
-            trackId: arguments.trackId,
-            moduleId: arguments.moduleId,
-          );
-        } on WorkspaceException {
-          history = _sessionHistory;
-        }
-      }
-      if (!mounted || _workspace?.id != workspace.id) {
-        return;
-      }
       setState(() {
         _workspace = updated;
-        _sessionHistory = history;
         _isPhaseSubmitting = false;
+        _declinedPhaseTransition = null;
       });
     } on WorkspaceException catch (error) {
       if (!mounted || _workspace?.id != workspace.id) {
@@ -650,6 +570,78 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     }
   }
 
+  bool _shouldShowPhaseCheckpoint(WorkspaceSession? workspace) {
+    if (workspace == null ||
+        workspace.currentPhase.toLowerCase() == 'evaluate' ||
+        workspace.status.toLowerCase() != 'active' ||
+        !workspace.phaseTransitionPending ||
+        _isLoadingWorkspace ||
+        _isAppendingEvent ||
+        _isPhaseSubmitting) {
+      return false;
+    }
+    return _declinedPhaseTransition != workspace.currentPhase;
+  }
+
+  String _phaseCheckpointQuestion(WorkspaceSession workspace) {
+    final liveQuestion = _lastTutorResponse?.phaseCheckpointQuestion?.trim();
+    if (liveQuestion != null && liveQuestion.isNotEmpty) {
+      return liveQuestion;
+    }
+
+    for (final event in workspace.events.reversed) {
+      final question = event.tutorPhaseCheckpointQuestion?.trim();
+      if (question != null && question.isNotEmpty) {
+        return question;
+      }
+    }
+
+    final topic = workspace.learningContext.currentModuleLabel.trim().isNotEmpty
+        ? workspace.learningContext.currentModuleLabel.trim()
+        : workspace.currentTopic.trim();
+    final latestLearnerText = workspace.events.reversed
+        .where(
+          (event) => event.isLearner && event.textPayload.trim().isNotEmpty,
+        )
+        .map((event) => event.textPayload.trim())
+        .firstOrNull;
+    final reasoning = workspace.events.reversed
+        .map((event) => event.tutorPhaseReasoning?.trim())
+        .whereType<String>()
+        .where((value) => value.isNotEmpty && !value.contains('_'))
+        .firstOrNull;
+    return _workspaceMaterial.phaseCheckpointFallback(
+      topic: topic,
+      learnerEvidence: latestLearnerText ?? reasoning ?? topic,
+    );
+  }
+
+  Future<void> _stayInCurrentPhase() async {
+    final workspace = _workspace;
+    if (workspace == null ||
+        _isLoadingWorkspace ||
+        _isAppendingEvent ||
+        _isPhaseSubmitting ||
+        !workspace.phaseTransitionPending) {
+      return;
+    }
+    final message = _workspaceMaterial.stayInPhaseMessage;
+    setState(() {
+      _declinedPhaseTransition = workspace.currentPhase;
+      _chatEntries.add(_WorkspaceChatEntry.text(text: message, isUser: true));
+    });
+    _scrollToBottom();
+    await _appendWorkspaceEvent(
+      eventType: 'text',
+      textPayload: message,
+      metadata: const {
+        'interaction_type': 'phase_checkpoint',
+        'checkpoint_decision': 'stay',
+      },
+    );
+    _scrollToBottom();
+  }
+
   Future<void> _startPosttestFromWorkspace() async {
     final workspace = _workspace;
     if (workspace == null || _isLoadingWorkspace || _isPhaseSubmitting) {
@@ -658,6 +650,10 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     final trigger = workspace.posttestTrigger;
     if (trigger?.isReady == true) {
       _openPosttestFromWorkspace();
+      return;
+    }
+    if (trigger?.isGenerating == true) {
+      _resumePendingPosttestPolling(workspace);
       return;
     }
     if (!workspace.posttestEligible) {
@@ -699,10 +695,12 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
       }
       setState(() {
         _workspace = updated;
-        _isPhaseSubmitting = false;
+        _isPhaseSubmitting = updated.posttestTrigger?.isGenerating == true;
       });
       if (updated.posttestTrigger?.isReady == true) {
         _openPosttestFromWorkspace();
+      } else if (updated.posttestTrigger?.isGenerating == true) {
+        unawaited(_pollPosttestStatus(workspace.id));
       } else {
         setState(() {
           _workspaceError =
@@ -721,6 +719,88 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     }
   }
 
+  void _resumePendingPosttestPolling(WorkspaceSession workspace) {
+    if (workspace.posttestTrigger?.isGenerating != true ||
+        _activePosttestPollingWorkspaceId == workspace.id) {
+      return;
+    }
+    if (mounted) {
+      setState(() {
+        _isPhaseSubmitting = true;
+        _workspaceError = null;
+      });
+    }
+    unawaited(_pollPosttestStatus(workspace.id));
+  }
+
+  Future<void> _pollPosttestStatus(String workspaceId) async {
+    if (_activePosttestPollingWorkspaceId == workspaceId) {
+      return;
+    }
+    _activePosttestPollingWorkspaceId = workspaceId;
+    final deadline = DateTime.now().add(_posttestPollingTimeout);
+    String? lastError;
+    try {
+      while (!_stopPosttestPolling && DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(_posttestPollingInterval);
+        if (!mounted || _workspace?.id != workspaceId) {
+          return;
+        }
+        WorkspaceSession refreshed;
+        try {
+          refreshed = await widget.workspaceRepository.fetchWorkspace(
+            workspaceId,
+          );
+          lastError = null;
+        } on WorkspaceException catch (error) {
+          lastError = error.message;
+          continue;
+        }
+        if (!mounted || _workspace?.id != workspaceId) {
+          return;
+        }
+        final trigger = refreshed.posttestTrigger;
+        setState(() {
+          _workspace = refreshed;
+          _chatEntries
+            ..clear()
+            ..addAll(_entriesFromEvents(refreshed.events));
+        });
+        if (trigger?.isReady == true) {
+          setState(() => _isPhaseSubmitting = false);
+          _openPosttestFromWorkspace();
+          return;
+        }
+        if (trigger?.isFailed == true) {
+          setState(() {
+            _isPhaseSubmitting = false;
+            _workspaceError =
+                trigger?.error ?? _workspaceMaterial.posttestUnavailableMessage;
+          });
+          return;
+        }
+        if (trigger?.isGenerating != true) {
+          setState(() {
+            _isPhaseSubmitting = false;
+            _workspaceError = _workspaceMaterial.posttestUnavailableMessage;
+          });
+          return;
+        }
+      }
+      if (mounted && _workspace?.id == workspaceId) {
+        setState(() {
+          _isPhaseSubmitting = false;
+          _workspaceError =
+              lastError ?? _workspaceMaterial.posttestGenerationDelayedMessage;
+        });
+      }
+    } finally {
+      if (_activePosttestPollingWorkspaceId == workspaceId) {
+        _activePosttestPollingWorkspaceId = null;
+      }
+    }
+  }
+
   void _openPosttestFromWorkspace() {
     final arguments = widget.routeArguments;
     final workspaceTitle = _workspace?.currentTopic.trim() ?? '';
@@ -734,32 +814,123 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
         moduleCompleted: _workspace?.status == 'completed',
         requestedEarlyPosttest: false,
         workspaceSessionId: _workspace?.id,
+        posttestSessionId: _workspace?.posttestTrigger?.posttestSessionId,
       ),
     );
   }
 
   Future<void> _handleCanvasSentToChat(CanvasWorkSnapshot snapshot) async {
+    if (_isAppendingEvent || _isUploadingAttachment) return;
+    String? imageAssetId;
+    Uint8List? imageBytes;
+    try {
+      imageBytes = await renderCanvasSnapshotPng(
+        snapshot,
+        copy: OnboardingCopy.forLanguage(
+          widget.onboardingController.profile.preferredLanguage,
+        ),
+      );
+      if (imageBytes != null) {
+        setState(() => _isUploadingAttachment = true);
+        imageAssetId = await widget.workspaceRepository.uploadCanvasImage(
+          bytes: imageBytes,
+          filename: 'canvas.png',
+          mimeType: 'image/png',
+        );
+      }
+    } on WorkspaceException catch (error) {
+      if (mounted) {
+        setState(() {
+          _isUploadingAttachment = false;
+          _workspaceError = _workspaceMaterial.canvasUploadFailedMessage(
+            error.message,
+          );
+        });
+      }
+      return;
+    } finally {
+      if (mounted) setState(() => _isUploadingAttachment = false);
+    }
+    if (!mounted || imageAssetId == null || imageBytes == null) return;
     setState(() {
-      _canvasSnapshots.add(snapshot);
-      _chatEntries.add(_WorkspaceChatEntry.canvas(snapshot));
+      _pendingAttachmentBytes = imageBytes;
+      _pendingAttachmentAssetId = imageAssetId;
+      _pendingAttachmentName = 'canvas.png';
+      _pendingAttachmentMimeType = 'image/png';
+      _pendingCanvasSnapshot = snapshot;
+      _workspaceError = null;
     });
-    await _appendWorkspaceEvent(
-      eventType: 'canvas_sent',
-      metadata: {
-        'version': snapshot.version,
-        'element_count': snapshot.elementCount,
-        'has_attachment': snapshot.hasAttachment,
-        'show_grid': snapshot.showGrid,
-        'canvas_width': snapshot.canvasSize.width,
-        'canvas_height': snapshot.canvasSize.height,
-      },
+  }
+
+  Future<void> _pickWorkspaceImage() async {
+    if (_isAppendingEvent || _isUploadingAttachment) return;
+    final result = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: const ['jpg', 'jpeg', 'png', 'webp'],
+      withData: true,
     );
-    _scrollToBottom();
+    if (!mounted || result == null || result.files.isEmpty) return;
+    final file = result.files.single;
+    final bytes = file.bytes;
+    if (bytes == null || bytes.isEmpty) {
+      setState(
+        () => _workspaceError = _workspaceMaterial.imageUnreadableMessage,
+      );
+      return;
+    }
+    if (bytes.length > 10 * 1024 * 1024) {
+      setState(() => _workspaceError = _workspaceMaterial.imageTooLargeMessage);
+      return;
+    }
+    final mimeType = _workspaceImageMimeType(file.extension);
+    setState(() => _isUploadingAttachment = true);
+    try {
+      final imageAssetId = await widget.workspaceRepository.uploadCanvasImage(
+        bytes: bytes,
+        filename: file.name,
+        mimeType: mimeType,
+      );
+      if (!mounted) return;
+      setState(() {
+        _pendingAttachmentBytes = bytes;
+        _pendingAttachmentAssetId = imageAssetId;
+        _pendingAttachmentName = file.name;
+        _pendingAttachmentMimeType = mimeType;
+        _pendingCanvasSnapshot = null;
+        _workspaceError = null;
+      });
+    } on WorkspaceException catch (error) {
+      if (mounted) setState(() => _workspaceError = error.message);
+    } finally {
+      if (mounted) setState(() => _isUploadingAttachment = false);
+    }
+  }
+
+  void _removePendingAttachment() {
+    if (_isAppendingEvent || _isUploadingAttachment) return;
+    setState(() {
+      _pendingAttachmentBytes = null;
+      _pendingAttachmentAssetId = null;
+      _pendingAttachmentName = null;
+      _pendingAttachmentMimeType = null;
+      _pendingCanvasSnapshot = null;
+    });
+  }
+
+  static String _workspaceImageMimeType(String? extension) {
+    return switch (extension?.toLowerCase()) {
+      'jpg' || 'jpeg' => 'image/jpeg',
+      'webp' => 'image/webp',
+      _ => 'image/png',
+    };
   }
 
   Future<void> _sendMessage() async {
     final message = _messageController.text.trim();
-    if (message.isEmpty) return;
+    final imageAssetId = _pendingAttachmentAssetId;
+    final canvasSnapshot = _pendingCanvasSnapshot;
+    if (message.isEmpty && imageAssetId == null) return;
+    if (_isAppendingEvent || _isUploadingAttachment) return;
     if (_isLoadingWorkspace || _workspace == null) {
       setState(() {
         _workspaceError = _workspaceMaterial.chatLoadingMessage;
@@ -771,7 +942,27 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     setState(() {
       _chatEntries.add(_WorkspaceChatEntry.text(text: message, isUser: true));
     });
-    await _appendWorkspaceEvent(eventType: 'text', textPayload: message);
+    if (canvasSnapshot != null) _canvasSnapshots.add(canvasSnapshot);
+    final sent = await _appendWorkspaceEvent(
+      eventType: canvasSnapshot == null ? 'text' : 'canvas_sent',
+      textPayload: message,
+      imageAssetId: imageAssetId,
+      metadata: {
+        if (canvasSnapshot != null) ...{
+          'version': canvasSnapshot.version,
+          'element_count': canvasSnapshot.elementCount,
+          'has_attachment': canvasSnapshot.hasAttachment,
+          'show_grid': canvasSnapshot.showGrid,
+          'canvas_width': canvasSnapshot.canvasSize.width,
+          'canvas_height': canvasSnapshot.canvasSize.height,
+        },
+        if (imageAssetId != null) 'attachment_name': _pendingAttachmentName,
+        if (_pendingAttachmentMimeType != null)
+          'attachment_mime_type': _pendingAttachmentMimeType,
+        'image_uploaded': imageAssetId != null,
+      },
+    );
+    if (sent && mounted) _removePendingAttachment();
     _scrollToBottom();
   }
 
@@ -804,17 +995,18 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     _scrollToBottom();
   }
 
-  Future<void> _appendWorkspaceEvent({
+  Future<bool> _appendWorkspaceEvent({
     required String eventType,
     String textPayload = '',
     Map<String, dynamic> metadata = const {},
+    String? imageAssetId,
   }) async {
     final workspace = _workspace;
     if (workspace == null) {
       setState(() {
         _workspaceError = _workspaceMaterial.workspaceNotReadyMessage;
       });
-      return;
+      return false;
     }
     setState(() {
       _isAppendingEvent = true;
@@ -826,34 +1018,26 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
         eventType: eventType,
         textPayload: textPayload,
         metadata: metadata,
+        imageAssetId: imageAssetId,
       );
-      if (!mounted || _workspace?.id != workspace.id) return;
-      final arguments = widget.routeArguments;
-      var history = _sessionHistory;
-      if (arguments != null && arguments.isValid) {
-        try {
-          history = await widget.workspaceRepository.fetchSessionHistory(
-            trackId: arguments.trackId,
-            moduleId: arguments.moduleId,
-          );
-        } on WorkspaceException {
-          history = _sessionHistory;
-        }
-      }
-      if (!mounted || _workspace?.id != workspace.id) return;
+      if (!mounted || _workspace?.id != workspace.id) return false;
       setState(() {
         _workspace = result.workspace;
-        _sessionHistory = history;
         _chatEntries
           ..clear()
           ..addAll(_entriesFromEvents(result.workspace.events));
         _isAppendingEvent = false;
+        _lastTutorResponse = result.tutorResponse;
+        _lastMasteryUpdate = result.masteryUpdate;
+        _declinedPhaseTransition = null;
       });
+      return true;
     } on WorkspaceException catch (error) {
-      if (!mounted || _workspace?.id != workspace.id) return;
+      if (!mounted || _workspace?.id != workspace.id) return false;
       setState(() {
         _isAppendingEvent = false;
         _workspaceError = error.message;
+        _declinedPhaseTransition = null;
         _chatEntries.add(
           _WorkspaceChatEntry.text(
             text: _workspaceMaterial.workspaceSyncFailedMessage(error.message),
@@ -861,21 +1045,43 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
           ),
         );
       });
+      return false;
     }
   }
 
   List<_WorkspaceChatEntry> _entriesFromEvents(List<WorkspaceEvent> events) {
+    final material = _workspaceMaterial;
     return events
         .map((event) {
+          final imageUrl = event.hasImage
+              ? widget.workspaceRepository.imageAssetUrl(event.imageAssetId!)
+              : null;
           if (event.eventType == 'canvas_sent') {
             final count = event.metadata['element_count'];
             return _WorkspaceChatEntry.text(
-              text: _workspaceMaterial.canvasSnapshotSentLabel(count),
+              text: event.textPayload.trim().isEmpty
+                  ? material.canvasSnapshotSentLabel(count)
+                  : event.textPayload,
               isUser: true,
+              imageUrl: imageUrl,
+              timestamp: event.createdAt,
+            );
+          }
+          if (event.eventType == 'media_generated') {
+            return _WorkspaceChatEntry.systemNote(
+              material.videoRequestedNote,
+              timestamp: event.createdAt,
             );
           }
           if (event.textPayload.trim().isEmpty) {
-            return null;
+            return imageUrl == null
+                ? null
+                : _WorkspaceChatEntry.text(
+                    text: material.imageSentLabel,
+                    isUser: event.isLearner,
+                    imageUrl: imageUrl,
+                    timestamp: event.createdAt,
+                  );
           }
           return _WorkspaceChatEntry.text(
             text: event.textPayload,
@@ -883,6 +1089,9 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
             nextActions: event.tutorNextActions,
             evidenceRequest: event.tutorEvidenceRequest,
             explanationCard: event.tutorExplanationCard,
+            imageUrl: imageUrl,
+            isDegraded: !event.isLearner && event.isDegradedTutorTurn,
+            timestamp: event.createdAt,
             toolSuggestion: event.tutorToolSuggestion,
           );
         })
@@ -893,7 +1102,7 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
   void _openCanvas() {
     showGeneralDialog<void>(
       context: context,
-      barrierLabel: 'Canvas workspace',
+      barrierLabel: WicaraCopyScope.of(context).canvasWorkspaceLabel,
       barrierDismissible: true,
       barrierColor: WicaraColors.ink.withValues(alpha: 0.14),
       transitionDuration: const Duration(milliseconds: 260),
@@ -929,19 +1138,6 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     );
   }
 
-  bool _canAdvancePhase(WorkspaceSession? workspace) {
-    if (workspace == null) {
-      return false;
-    }
-    if (workspace.currentPhase == 'evaluate') {
-      return false;
-    }
-    if (_isLoadingWorkspace || _isPhaseSubmitting || _isAppendingEvent) {
-      return false;
-    }
-    return workspace.phaseTransitionPending;
-  }
-
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scrollController.hasClients) return;
@@ -975,13 +1171,17 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     final showStartPosttestButton =
         workspace?.posttestEligible == true ||
         workspace?.posttestTrigger?.isReady == true;
-    final canAdvancePhase = _canAdvancePhase(workspace);
+    final showPhaseCheckpoint = _shouldShowPhaseCheckpoint(workspace);
+    final phaseCheckpointQuestion = workspace == null
+        ? ''
+        : _phaseCheckpointQuestion(workspace);
     final workspaceDescription =
         (_workspace?.currentTopicDescription.trim().isNotEmpty ?? false)
         ? _workspace!.currentTopicDescription.trim()
         : (_workspace == null
               ? material.loadingDescription
               : material.syncedDescription);
+    final showTopicOverview = _chatEntries.isEmpty;
     return Scaffold(
       backgroundColor: WicaraColors.pageBackground,
       body: SafeArea(
@@ -1052,12 +1252,8 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
                                   ),
                                   label: Text(
                                     showHeaderDetails
-                                        ? (material.isIndonesian
-                                              ? 'Ringkas'
-                                              : 'Collapse')
-                                        : (material.isIndonesian
-                                              ? 'Detail'
-                                              : 'Details'),
+                                        ? material.collapseLabel
+                                        : material.detailsLabel,
                                   ),
                                   style: TextButton.styleFrom(
                                     padding: const EdgeInsets.symmetric(
@@ -1079,15 +1275,17 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.stretch,
                                 children: [
-                                  _WorkspaceTopicCard(
-                                    copy: copy,
-                                    title:
-                                        _workspace?.currentTopic ??
-                                        widget.routeArguments?.moduleTitle ??
-                                        material.topicTitle,
-                                    description: workspaceDescription,
-                                  ),
-                                  const SizedBox(height: 10),
+                                  if (showTopicOverview) ...[
+                                    _WorkspaceTopicCard(
+                                      copy: copy,
+                                      title:
+                                          _workspace?.currentTopic ??
+                                          widget.routeArguments?.moduleTitle ??
+                                          material.topicTitle,
+                                      description: workspaceDescription,
+                                    ),
+                                    const SizedBox(height: 10),
+                                  ],
                                   _PhaseStepperBar(
                                     currentPhase:
                                         workspace?.currentPhase ?? 'engage',
@@ -1095,44 +1293,6 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
                                         workspace?.phaseTransitionPending ??
                                         false,
                                     material: material,
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Row(
-                                    children: [
-                                      Expanded(
-                                        child: OutlinedButton.icon(
-                                          onPressed: _isLoadingWorkspace
-                                              ? null
-                                              : () {
-                                                  unawaited(
-                                                    _startNewChatSession(),
-                                                  );
-                                                },
-                                          icon: const Icon(
-                                            Icons.add_comment_outlined,
-                                          ),
-                                          label: Text(material.newChatLabel),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Expanded(
-                                        child: OutlinedButton.icon(
-                                          onPressed: () {
-                                            unawaited(
-                                              _openSessionHistorySheet(),
-                                            );
-                                          },
-                                          icon: const Icon(
-                                            Icons.history_rounded,
-                                          ),
-                                          label: Text(
-                                            material.historyButtonLabel(
-                                              _sessionHistory.length,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ],
                                   ),
                                   if (showStartPosttestButton) ...[
                                     const SizedBox(height: 8),
@@ -1150,7 +1310,13 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
                                         Icons.assignment_turned_in_outlined,
                                       ),
                                       label: Text(
-                                        material.startPosttestButtonLabel,
+                                        workspace
+                                                    ?.posttestTrigger
+                                                    ?.isGenerating ==
+                                                true
+                                            ? material
+                                                  .posttestGeneratingButtonLabel
+                                            : material.startPosttestButtonLabel,
                                       ),
                                     ),
                                   ],
@@ -1195,6 +1361,24 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
                                 videoErrorMessage: _videoErrorMessage,
                                 canGenerateVideo:
                                     _canGenerateVideoForCurrentTopic(),
+                                tutorDegraded:
+                                    _workspace?.tutorDegraded ?? false,
+                                hintLevel: _workspace?.hintLevel ?? 0,
+                                learningContext: _workspace?.learningContext,
+                                imageHeaders: widget.workspaceRepository
+                                    .imageAssetHeaders(),
+                                lastTutorResponse: _lastTutorResponse,
+                                lastMasteryUpdate: _lastMasteryUpdate,
+                                canResumeVideo: _activeVideoJobId != null,
+                                onResumeVideo: () {
+                                  unawaited(_resumeVideoPolling());
+                                },
+                                onVideoViewed: () {
+                                  final artifact = _latestVideoArtifact;
+                                  if (artifact != null) {
+                                    unawaited(_markVideoViewed(artifact));
+                                  }
+                                },
                                 weeklyReport: _reportCardDismissed
                                     ? null
                                     : _weeklyReport,
@@ -1222,16 +1406,21 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
                     _WorkspaceFooter(
                       controller: _messageController,
                       onSend: _sendMessage,
-                      onAdvancePhase: () {
+                      onConfirmPhase: () {
                         unawaited(_advancePhase());
                       },
-                      onGenerateVideo: () {
-                        unawaited(_generateVideo());
-                      },
-                      canAdvancePhase: canAdvancePhase,
+                      onStayInPhase: _stayInCurrentPhase,
+                      showPhaseCheckpoint: showPhaseCheckpoint,
+                      currentPhase: workspace?.currentPhase ?? 'engage',
+                      phaseCheckpointQuestion: phaseCheckpointQuestion,
+                      isSending: _isAppendingEvent,
                       isPhaseSubmitting: _isPhaseSubmitting,
-                      isVideoGenerating: _isVideoGenerating,
-                      canGenerateVideo: _canGenerateVideoForCurrentTopic(),
+                      onOpenCanvas: _openCanvas,
+                      onAttachImage: _pickWorkspaceImage,
+                      onRemoveAttachment: _removePendingAttachment,
+                      pendingAttachmentBytes: _pendingAttachmentBytes,
+                      pendingAttachmentName: _pendingAttachmentName,
+                      isUploadingAttachment: _isUploadingAttachment,
                       copy: copy,
                       material: material,
                     ),
@@ -1253,15 +1442,24 @@ class _WorkspaceChatEntry {
     this.nextActions = const [],
     this.evidenceRequest,
     this.explanationCard,
+    this.imageUrl,
+    this.isDegraded = false,
+    this.timestamp,
     this.toolSuggestion,
-  }) : snapshot = null;
+  }) : snapshot = null,
+       isSystemNote = false;
 
-  const _WorkspaceChatEntry.canvas(this.snapshot)
-    : text = null,
-      isUser = true,
+  /// A non-conversational marker in the transcript, e.g. "a video was requested
+  /// here". Rendered centred and muted rather than as a chat bubble.
+  const _WorkspaceChatEntry.systemNote(this.text, {this.timestamp})
+    : isUser = false,
+      snapshot = null,
       nextActions = const [],
       evidenceRequest = null,
       explanationCard = null,
+      imageUrl = null,
+      isDegraded = false,
+      isSystemNote = true,
       toolSuggestion = null;
 
   final String? text;
@@ -1270,6 +1468,10 @@ class _WorkspaceChatEntry {
   final List<String> nextActions;
   final Map<String, dynamic>? evidenceRequest;
   final Map<String, dynamic>? explanationCard;
+  final String? imageUrl;
+  final bool isDegraded;
+  final bool isSystemNote;
+  final DateTime? timestamp;
   final WorkspaceToolSuggestion? toolSuggestion;
 
   bool get isCanvas => snapshot != null;
@@ -1280,313 +1482,520 @@ class _WorkspaceChatEntry {
       toolSuggestion != null;
 }
 
-class _WorkspaceHistorySheet extends StatelessWidget {
-  const _WorkspaceHistorySheet({
-    required this.sessions,
-    required this.activeSessionId,
-    required this.material,
-  });
+class _LocalizedWorkspaceMaterial {
+  const _LocalizedWorkspaceMaterial(this.languageCode);
 
-  final List<WorkspaceSessionSummary> sessions;
-  final String? activeSessionId;
-  final _LocalizedWorkspaceMaterial material;
+  factory _LocalizedWorkspaceMaterial.forLanguage(String languageCode) =>
+      _LocalizedWorkspaceMaterial(normalizeLanguageCode(languageCode));
 
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxHeight: 520),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 4, 20, 10),
-              child: Text(
-                material.chatHistoryTitle,
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: WicaraColors.ink,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
-            Flexible(
-              child: ListView.separated(
-                shrinkWrap: true,
-                itemCount: sessions.length,
-                separatorBuilder: (_, _) => const Divider(height: 1),
-                itemBuilder: (context, index) {
-                  final session = sessions[index];
-                  final isActive = session.id == activeSessionId;
-                  return ListTile(
-                    leading: Icon(
-                      isActive
-                          ? Icons.chat_bubble_rounded
-                          : Icons.chat_bubble_outline_rounded,
-                      color: isActive
-                          ? WicaraColors.primary
-                          : WicaraColors.muted,
-                    ),
-                    title: Text(
-                      material.historySessionTitle(session.title),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w800),
-                    ),
-                    subtitle: Text(
-                      _historySubtitle(session),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    trailing: isActive
-                        ? const Icon(Icons.check_rounded)
-                        : const Icon(Icons.chevron_right_rounded),
-                    onTap: () => Navigator.of(context).pop(session.id),
-                  );
-                },
-              ),
-            ),
-          ],
-        ),
-      ),
+  /// One of [supportedLanguageCodes]. English and Indonesian live inline
+  /// below; the other languages resolve through [copyTranslations] and fall
+  /// back to English when a key is missing.
+  final String languageCode;
+
+  bool get isIndonesian => languageCode == 'id';
+
+  /// BCP 47 tag for speech synthesis and recognition, which need a region.
+  String get speechLocale =>
+      OnboardingCopy.forLanguage(languageCode).speechLocale;
+
+  String _t(String key, {required String en, required String id}) {
+    switch (languageCode) {
+      case 'en':
+        return en;
+      case 'id':
+        return id;
+      default:
+        return copyTranslations[languageCode]?['workspace.$key'] ?? en;
+    }
+  }
+
+  /// Like [_t] but substitutes `{0}`, `{1}` … in the translated template.
+  /// The [en] and [id] variants are already interpolated by the caller.
+  String _tf(
+    String key, {
+    required String en,
+    required String id,
+    required List<Object?> args,
+  }) {
+    if (languageCode == 'en') return en;
+    if (languageCode == 'id') return id;
+    final template = copyTranslations[languageCode]?['workspace.$key'];
+    if (template == null) return en;
+    var result = template;
+    for (var i = 0; i < args.length; i++) {
+      result = result.replaceAll('{$i}', '${args[i]}');
+    }
+    return result;
+  }
+
+  String get topicTitle =>
+      _t('topicTitle', en: 'Learning topic', id: 'Topik pembelajaran');
+  String get startChatTitle =>
+      _t('startChatTitle', en: 'Start learning', id: 'Mulai sesi belajar');
+  String get startChatBody => _t(
+    'startChatBody',
+    en: 'The tutor will guide you from the diagnosis and learning phase stored by the backend.',
+    id: 'Tutor akan memandu dari diagnosis dan fase belajar yang tersimpan di backend.',
+  );
+  String get startChatButtonLabel => _t(
+    'startChatButtonLabel',
+    en: 'Start learning chat',
+    id: 'Mulai chat belajar',
+  );
+  String get loadingDescription => _t(
+    'loadingDescription',
+    en: 'Connecting this module to the backend learning context.',
+    id: 'Menghubungkan modul dengan konteks belajar dari backend.',
+  );
+  String get syncedDescription => _t(
+    'syncedDescription',
+    en: 'Conversation, canvas, media, and phase state are synced with the backend.',
+    id: 'Percakapan, kanvas, media, dan status fase disinkronkan dengan backend.',
+  );
+
+  String get workspaceTitleLabel =>
+      _t('workspaceTitleLabel', en: 'Workspace', id: 'Ruang belajar');
+  String get newChatLabel =>
+      _t('newChatLabel', en: 'New chat', id: 'Chat baru');
+  String get chatHistoryTitle =>
+      _t('chatHistoryTitle', en: 'Chat history', id: 'Riwayat chat');
+  String get advancePhaseLabel =>
+      _t('advancePhaseLabel', en: 'Advance phase', id: 'Lanjut fase');
+  String get advancingPhaseLabel => _t(
+    'advancingPhaseLabel',
+    en: 'Advancing phase...',
+    id: 'Memindahkan fase...',
+  );
+  String get phaseTransitionHint => _t(
+    'phaseTransitionHint',
+    en: 'This phase is complete. Keep learning here until you are ready.',
+    id: 'Fase ini selesai. Tetap belajar di sini sampai kamu siap.',
+  );
+
+  String phaseCheckpointFallback({
+    required String topic,
+    required String learnerEvidence,
+  }) {
+    final evidence = learnerEvidence.length <= 96
+        ? learnerEvidence
+        : '${learnerEvidence.substring(0, 93)}...';
+    return _tf(
+      'phaseCheckpointPrompt',
+      en: 'Thinking about your response “$evidence” on $topic, does that match what you understand now?',
+      id: 'Dari jawabanmu “$evidence” tentang $topic, apakah itu sudah sesuai dengan pemahamanmu sekarang?',
+      args: [evidence, topic],
     );
   }
 
-  String _historySubtitle(WorkspaceSessionSummary session) {
-    final parts = <String>[];
-    if (session.preview.isNotEmpty) {
-      parts.add(session.preview);
-    }
-    final countLabel = material.historyMessageCountLabel(session.messageCount);
-    parts.add(countLabel);
-    final timeLabel = _compactDate(session.updatedAt);
-    if (timeLabel.isNotEmpty) {
-      parts.add(timeLabel);
-    }
-    return parts.join(' | ');
-  }
+  String get confirmPhaseLabel => _t('confirmPhaseLabel', en: 'Yes', id: 'Iya');
+  String get stayInPhaseLabel =>
+      _t('stayInPhaseLabel', en: 'Not yet', id: 'Belum');
+  String get stayInPhaseMessage => _t(
+    'stayInPhaseMessage',
+    en: 'Not yet, I still need help with this part.',
+    id: 'Belum, bagian ini masih belum jelas buat saya.',
+  );
 
-  String _compactDate(String value) {
-    final parsed = DateTime.tryParse(value);
-    if (parsed == null) {
-      return '';
-    }
-    final local = parsed.toLocal();
-    final hour = local.hour.toString().padLeft(2, '0');
-    final minute = local.minute.toString().padLeft(2, '0');
-    return '${local.day}/${local.month} $hour:$minute';
-  }
-}
+  /// The 5E phase names are kept untranslated on purpose — they are the
+  /// pedagogical model's proper names and are used as identifiers in the UI.
+  String phaseLabel(String phase) => switch (phase.trim().toLowerCase()) {
+    'explore' => 'Explore',
+    'explain' => 'Explain',
+    'elaborate' => 'Elaborate',
+    'evaluate' => 'Evaluate',
+    _ => 'Engage',
+  };
 
-class _LocalizedWorkspaceMaterial {
-  const _LocalizedWorkspaceMaterial({
-    required this.isIndonesian,
-    required this.topicTitle,
-    required this.startChatTitle,
-    required this.startChatBody,
-    required this.startChatButtonLabel,
-    required this.loadingDescription,
-    required this.syncedDescription,
-  });
-
-  final bool isIndonesian;
-  final String topicTitle;
-  final String startChatTitle;
-  final String startChatBody;
-  final String startChatButtonLabel;
-  final String loadingDescription;
-  final String syncedDescription;
-
-  String get workspaceTitleLabel =>
-      isIndonesian ? 'Ruang belajar' : 'Workspace';
-  String get newChatLabel => isIndonesian ? 'Chat baru' : 'New chat';
-  String get chatHistoryTitle => isIndonesian ? 'Riwayat chat' : 'Chat history';
-  String get advancePhaseLabel =>
-      isIndonesian ? 'Lanjut fase' : 'Advance phase';
-  String get advancingPhaseLabel =>
-      isIndonesian ? 'Memindahkan fase...' : 'Advancing phase...';
-  String get phaseTransitionHint => isIndonesian
-      ? "Tekan 'Lanjut fase' kalau sudah paham."
-      : "Tap 'Advance phase' when you are ready.";
-  String phaseLabel(String phase) {
-    return switch (phase.trim().toLowerCase()) {
-      'engage' => isIndonesian ? 'Engage' : 'Engage',
-      'explore' => isIndonesian ? 'Explore' : 'Explore',
-      'explain' => isIndonesian ? 'Explain' : 'Explain',
-      'elaborate' => isIndonesian ? 'Elaborate' : 'Elaborate',
-      'evaluate' => isIndonesian ? 'Evaluate' : 'Evaluate',
-      _ => isIndonesian ? 'Engage' : 'Engage',
-    };
-  }
-
-  String get startPosttestButtonLabel =>
-      isIndonesian ? 'Mulai Posttest' : 'Start Posttest';
-  String get posttestReadyBody => isIndonesian
-      ? 'Mulai posttest sekarang? Ini akan menutup modul workspace dan menyiapkan sesi posttest.'
-      : 'Start posttest now? This will complete the workspace module and prepare the posttest session.';
-  String get cancelLabel => isIndonesian ? 'Batal' : 'Cancel';
-  String get startPosttestDialogLabel =>
-      isIndonesian ? 'Mulai posttest' : 'Start posttest';
-  String get posttestUnavailableMessage => isIndonesian
-      ? 'Posttest belum siap. Lanjutkan sesuai arahan tutor.'
-      : 'The posttest is not ready yet. Continue with the tutor guidance.';
-  String get workspaceNotReadyMessage =>
-      isIndonesian ? 'Workspace belum siap.' : 'Workspace is not ready yet.';
-  String get openTrackModuleMessage => isIndonesian
-      ? 'Buka modul track dari Beranda atau Antrian sebelum memakai workspace.'
-      : 'Open a track module from Home or Queue before using workspace.';
-  String get chatLoadingMessage => isIndonesian
-      ? 'Sesi chat masih dimuat.'
-      : 'Chat session is still loading.';
-  String get connectingWorkspaceMessage => isIndonesian
-      ? 'Menghubungkan ke workspace backend...'
-      : 'Connecting to backend workspace...';
-  String get savingEvidenceMessage => isIndonesian
-      ? 'Menyimpan bukti workspace...'
-      : 'Saving workspace evidence...';
-  String get queueingVideoMessage => isIndonesian
-      ? 'Menyiapkan pembuatan video...'
-      : 'Queueing video generation...';
-  String get videoQueuedMessage => isIndonesian
-      ? 'Video masuk antrean. Menunggu worker...'
-      : 'Video queued. Waiting for worker...';
-  String videoTimedOutMessage(int minutes) => isIndonesian
-      ? 'Pembuatan video melewati batas waktu setelah $minutes menit.'
-      : 'Video generation timed out after $minutes minutes.';
-  String get generationTimeoutMessage =>
-      isIndonesian ? 'Waktu pembuatan habis.' : 'Generation timeout.';
-  String get buildingScenesMessage => isIndonesian
-      ? 'Membangun scene, narasi, dan rendering...'
-      : 'Building scenes, narration, and rendering...';
+  String get startPosttestButtonLabel => _t(
+    'startPosttestButtonLabel',
+    en: 'Start Posttest',
+    id: 'Mulai Posttest',
+  );
+  String get posttestReadyBody => _t(
+    'posttestReadyBody',
+    en: 'Start posttest now? This will complete the workspace module and prepare the posttest session.',
+    id: 'Mulai posttest sekarang? Ini akan menutup modul workspace dan menyiapkan sesi posttest.',
+  );
+  String get cancelLabel => _t('cancelLabel', en: 'Cancel', id: 'Batal');
+  String get startPosttestDialogLabel => _t(
+    'startPosttestDialogLabel',
+    en: 'Start posttest',
+    id: 'Mulai posttest',
+  );
+  String get posttestUnavailableMessage => _t(
+    'posttestUnavailableMessage',
+    en: 'The posttest is not ready yet. Continue with the tutor guidance.',
+    id: 'Posttest belum siap. Lanjutkan sesuai arahan tutor.',
+  );
+  String get posttestGeneratingButtonLabel => _t(
+    'posttestGeneratingButtonLabel',
+    en: 'Preparing posttest...',
+    id: 'Menyiapkan posttest...',
+  );
+  String get posttestGenerationDelayedMessage => _t(
+    'posttestGenerationDelayedMessage',
+    en: 'Posttest generation is still running. You can leave and resume this workspace later.',
+    id: 'Posttest masih dibuat. Kamu bisa keluar dan melanjutkan workspace ini nanti.',
+  );
+  String get workspaceNotReadyMessage => _t(
+    'workspaceNotReadyMessage',
+    en: 'Workspace is not ready yet.',
+    id: 'Workspace belum siap.',
+  );
+  String get openTrackModuleMessage => _t(
+    'openTrackModuleMessage',
+    en: 'Open a track module from Home or Queue before using workspace.',
+    id: 'Buka modul track dari Beranda atau Antrian sebelum memakai workspace.',
+  );
+  String get chatLoadingMessage => _t(
+    'chatLoadingMessage',
+    en: 'Chat session is still loading.',
+    id: 'Sesi chat masih dimuat.',
+  );
+  String get connectingWorkspaceMessage => _t(
+    'connectingWorkspaceMessage',
+    en: 'Connecting to backend workspace...',
+    id: 'Menghubungkan ke workspace backend...',
+  );
+  String get savingEvidenceMessage => _t(
+    'savingEvidenceMessage',
+    en: 'Saving workspace evidence...',
+    id: 'Menyimpan bukti workspace...',
+  );
+  String get queueingVideoMessage => _t(
+    'queueingVideoMessage',
+    en: 'Queueing video generation...',
+    id: 'Menyiapkan pembuatan video...',
+  );
+  String get videoQueuedMessage => _t(
+    'videoQueuedMessage',
+    en: 'Video queued. Waiting for worker...',
+    id: 'Video masuk antrean. Menunggu worker...',
+  );
+  String videoTimedOutMessage(int minutes) => _tf(
+    'videoTimedOutMessage',
+    en: 'Video generation timed out after $minutes minutes.',
+    id: 'Pembuatan video melewati batas waktu setelah $minutes menit.',
+    args: [minutes],
+  );
+  String get generationTimeoutMessage => _t(
+    'generationTimeoutMessage',
+    en: 'Generation timeout.',
+    id: 'Waktu pembuatan habis.',
+  );
+  String get buildingScenesMessage => _t(
+    'buildingScenesMessage',
+    en: 'Building scenes, narration, and rendering...',
+    id: 'Membangun scene, narasi, dan rendering...',
+  );
   String get generatingVideoTitle =>
-      isIndonesian ? 'Membuat video' : 'Generating video';
-  String get generatedVideoFallbackTitle =>
-      isIndonesian ? 'Video yang dibuat' : 'Generated video';
-  String get savedGeneratedVideoTitle =>
-      isIndonesian ? 'Video tersimpan' : 'Saved generated video';
-  String get generatedVideoSubtitle => isIndonesian
-      ? 'Rendering video selesai dan siap di workspace.'
-      : 'Video rendering finished and is ready in your workspace.';
-  String get aiVideoChip => isIndonesian ? 'Video AI' : 'AI video';
-  String get readyUrlChip => isIndonesian ? 'URL siap' : 'Ready URL';
-  String get playGeneratedVideoLabel =>
-      isIndonesian ? 'Putar video' : 'Play generated video';
-  String get videoUrlUnavailableLabel =>
-      isIndonesian ? 'URL video tidak tersedia' : 'Video URL unavailable';
-  String get videoGenerationFailedTitle =>
-      isIndonesian ? 'Pembuatan video gagal' : 'Video generation failed';
-  String get videoGenerationFailedMessage =>
-      isIndonesian ? 'Pembuatan video gagal.' : 'Video generation failed.';
-  String get visualOnlyExploreMessage => isIndonesian
-      ? 'Visualisasi hanya dapat dibuat saat fase Explore.'
-      : 'Visualizations can only be generated during Explore.';
+      _t('generatingVideoTitle', en: 'Generating video', id: 'Membuat video');
+  String get generatedVideoFallbackTitle => _t(
+    'generatedVideoFallbackTitle',
+    en: 'Generated video',
+    id: 'Video yang dibuat',
+  );
+  String get savedGeneratedVideoTitle => _t(
+    'savedGeneratedVideoTitle',
+    en: 'Saved generated video',
+    id: 'Video tersimpan',
+  );
+  String get generatedVideoSubtitle => _t(
+    'generatedVideoSubtitle',
+    en: 'Video rendering finished and is ready in your workspace.',
+    id: 'Rendering video selesai dan siap di workspace.',
+  );
+  String get aiVideoChip => _t('aiVideoChip', en: 'AI video', id: 'Video AI');
+  String get readyUrlChip =>
+      _t('readyUrlChip', en: 'Ready URL', id: 'URL siap');
+  String get playGeneratedVideoLabel => _t(
+    'playGeneratedVideoLabel',
+    en: 'Play generated video',
+    id: 'Putar video',
+  );
+  String get videoUrlUnavailableLabel => _t(
+    'videoUrlUnavailableLabel',
+    en: 'Video URL unavailable',
+    id: 'URL video tidak tersedia',
+  );
+  String get videoGenerationFailedTitle => _t(
+    'videoGenerationFailedTitle',
+    en: 'Video generation failed',
+    id: 'Pembuatan video gagal',
+  );
+  String get videoGenerationFailedMessage => _t(
+    'videoGenerationFailedMessage',
+    en: 'Video generation failed.',
+    id: 'Pembuatan video gagal.',
+  );
+  String get visualOnlyExploreMessage => _t(
+    'visualOnlyExploreMessage',
+    en: 'Visualizations can only be generated during Explore.',
+    id: 'Visualisasi hanya dapat dibuat saat fase Explore.',
+  );
   String get visualSuggestionLabel =>
-      isIndonesian ? 'Bantuan visual' : 'Visual support';
-  String get acceptVisualSuggestionLabel =>
-      isIndonesian ? 'Buat visualisasi' : 'Generate visualization';
-  String get retryGenerateVideoLabel =>
-      isIndonesian ? 'Coba buat video lagi' : 'Retry generate video';
-  String get generatingVideoButtonLabel =>
-      isIndonesian ? 'Membuat video...' : 'Generating video...';
-  String get generateVideoFromChatLabel => isIndonesian
-      ? 'Buat video dari chat ini'
-      : 'Generate video from this chat';
-  String get generatingVideoContextMessage => isIndonesian
-      ? 'Membuat video dari konteks percakapan terakhirmu...'
-      : 'Generating video from your latest conversation context...';
-  String get videoReadyMessage => isIndonesian
-      ? 'Video siap. Kamu bisa memutarnya dari kartu chat terbaru.'
-      : 'Video ready. You can play it from the latest chat card.';
-  String get failedToLoadVideoMessage => isIndonesian
-      ? 'Gagal memuat video dari URL backend.'
-      : 'Failed to load video from backend URL.';
-  String get openFullscreenTooltip =>
-      isIndonesian ? 'Buka layar penuh' : 'Open fullscreen';
-  String durationChipLabel(String durationLabel) =>
-      isIndonesian ? 'Durasi $durationLabel' : 'Duration $durationLabel';
-  String get canvasAttachedPrompt => isIndonesian
-      ? 'Kanvas sudah terlampir. Tambahkan sketsa lain jika perlu.'
-      : 'Canvas work is attached. Add another sketch if needed.';
-  String get canvasPrompt => isIndonesian
-      ? 'Butuh papan tulis? Buka kanvas dan kirim sketsamu di sini.'
-      : 'Need a whiteboard? Open canvas and send your sketch here.';
-  String get openCanvasLabel => isIndonesian ? 'Buka kanvas' : 'Open canvas';
-  String get useCanvasLabel => isIndonesian ? 'Pakai kanvas' : 'Use canvas';
+      _t('visualSuggestionLabel', en: 'Visual support', id: 'Bantuan visual');
+  String get acceptVisualSuggestionLabel => _t(
+    'acceptVisualSuggestionLabel',
+    en: 'Generate visualization',
+    id: 'Buat visualisasi',
+  );
+  String get retryGenerateVideoLabel => _t(
+    'retryGenerateVideoLabel',
+    en: 'Retry generate video',
+    id: 'Coba buat video lagi',
+  );
+  String get generatingVideoButtonLabel => _t(
+    'generatingVideoButtonLabel',
+    en: 'Generating video...',
+    id: 'Membuat video...',
+  );
+  String get generateVideoFromChatLabel => _t(
+    'generateVideoFromChatLabel',
+    en: 'Generate video from this chat',
+    id: 'Buat video dari chat ini',
+  );
+  String get generatingVideoContextMessage => _t(
+    'generatingVideoContextMessage',
+    en: 'Generating video from your latest conversation context...',
+    id: 'Membuat video dari konteks percakapan terakhirmu...',
+  );
+  String get videoReadyMessage => _t(
+    'videoReadyMessage',
+    en: 'Video ready. You can play it from the latest chat card.',
+    id: 'Video siap. Kamu bisa memutarnya dari kartu chat terbaru.',
+  );
+  String get failedToLoadVideoMessage => _t(
+    'failedToLoadVideoMessage',
+    en: 'Failed to load video from backend URL.',
+    id: 'Gagal memuat video dari URL backend.',
+  );
+  String get openFullscreenTooltip => _t(
+    'openFullscreenTooltip',
+    en: 'Open fullscreen',
+    id: 'Buka layar penuh',
+  );
+  String durationChipLabel(String durationLabel) => _tf(
+    'durationChipLabel',
+    en: 'Duration $durationLabel',
+    id: 'Durasi $durationLabel',
+    args: [durationLabel],
+  );
+  String get canvasAttachedPrompt => _t(
+    'canvasAttachedPrompt',
+    en: 'Canvas work is attached. Add another sketch if needed.',
+    id: 'Kanvas sudah terlampir. Tambahkan sketsa lain jika perlu.',
+  );
+  String get canvasPrompt => _t(
+    'canvasPrompt',
+    en: 'Need a whiteboard? Open canvas and send your sketch here.',
+    id: 'Butuh papan tulis? Buka kanvas dan kirim sketsamu di sini.',
+  );
+  String get openCanvasLabel =>
+      _t('openCanvasLabel', en: 'Open canvas', id: 'Buka kanvas');
+  String get useCanvasLabel =>
+      _t('useCanvasLabel', en: 'Use canvas', id: 'Pakai kanvas');
   String get canvasSentLabel =>
-      isIndonesian ? 'Kanvas terkirim' : 'Canvas sent';
-  String get explanationCardLabel =>
-      isIndonesian ? 'Kartu penjelasan' : 'Explanation card';
-  String get evidenceRequestLabel =>
-      isIndonesian ? 'Bukti yang diminta' : 'Evidence requested';
+      _t('canvasSentLabel', en: 'Canvas sent', id: 'Kanvas terkirim');
+  String get explanationCardLabel => _t(
+    'explanationCardLabel',
+    en: 'Explanation card',
+    id: 'Kartu penjelasan',
+  );
+  String get evidenceRequestLabel => _t(
+    'evidenceRequestLabel',
+    en: 'Evidence requested',
+    id: 'Bukti yang diminta',
+  );
   String get nextActionsLabel =>
-      isIndonesian ? 'Aksi berikutnya' : 'Next actions';
+      _t('nextActionsLabel', en: 'Next actions', id: 'Aksi berikutnya');
+
   String canvasSnapshotSentLabel(Object? count) {
-    final suffix = count == null
-        ? ''
-        : isIndonesian
-        ? ' ($count tanda)'
-        : ' ($count marks)';
-    return isIndonesian
-        ? 'Snapshot kanvas terkirim$suffix'
-        : 'Canvas snapshot sent$suffix';
+    if (count == null) {
+      return _t(
+        'canvasSnapshotSentLabel',
+        en: 'Canvas snapshot sent',
+        id: 'Snapshot kanvas terkirim',
+      );
+    }
+    return _tf(
+      'canvasSnapshotSentCountLabel',
+      en: 'Canvas snapshot sent ($count marks)',
+      id: 'Snapshot kanvas terkirim ($count tanda)',
+      args: [count],
+    );
   }
 
   String canvasMarksLabel(int count, bool hasAttachment) {
-    final markText = isIndonesian ? '$count tanda' : '$count marks';
     if (!hasAttachment) {
-      return markText;
+      return _tf(
+        'canvasMarksLabel',
+        en: '$count marks',
+        id: '$count tanda',
+        args: [count],
+      );
     }
-    return isIndonesian
-        ? '$markText - kertas terlampir'
-        : '$markText - paper attached';
+    return _tf(
+      'canvasMarksAttachedLabel',
+      en: '$count marks - paper attached',
+      id: '$count tanda - kertas terlampir',
+      args: [count],
+    );
   }
 
-  String historyButtonLabel(int count) =>
-      isIndonesian ? 'Riwayat ($count)' : 'History ($count)';
+  String historyButtonLabel(int count) => _tf(
+    'historyButtonLabel',
+    en: 'History ($count)',
+    id: 'Riwayat ($count)',
+    args: [count],
+  );
 
   String historySessionTitle(String title) =>
       title.isEmpty ? newChatLabel : title;
 
-  String historyMessageCountLabel(int count) {
-    if (isIndonesian) {
-      return '$count pesan';
-    }
-    return count == 1 ? '1 message' : '$count messages';
-  }
+  String historyMessageCountLabel(int count) => _tf(
+    'historyMessageCountLabel',
+    en: count == 1 ? '1 message' : '$count messages',
+    id: '$count pesan',
+    args: [count],
+  );
 
-  String workspaceSyncFailedMessage(String message) => isIndonesian
-      ? 'Sinkronisasi workspace gagal: $message'
-      : 'Workspace sync failed: $message';
+  String workspaceSyncFailedMessage(String message) => _tf(
+    'workspaceSyncFailedMessage',
+    en: 'Workspace sync failed: $message',
+    id: 'Sinkronisasi workspace gagal: $message',
+    args: [message],
+  );
 
-  factory _LocalizedWorkspaceMaterial.forLanguage(String languageCode) {
-    if (languageCode == 'id') {
-      return const _LocalizedWorkspaceMaterial(
-        isIndonesian: true,
-        topicTitle: 'Topik pembelajaran',
-        startChatTitle: 'Mulai sesi belajar',
-        startChatBody:
-            'Tutor akan memandu dari diagnosis dan fase belajar yang tersimpan di backend.',
-        startChatButtonLabel: 'Mulai chat belajar',
-        loadingDescription:
-            'Menghubungkan modul dengan konteks belajar dari backend.',
-        syncedDescription:
-            'Percakapan, kanvas, media, dan status fase disinkronkan dengan backend.',
+  String get imageSentLabel =>
+      _t('imageSentLabel', en: 'Image sent', id: 'Gambar terkirim');
+
+  String get videoRequestedNote => _t(
+    'videoRequestedNote',
+    en: 'A video was requested here.',
+    id: 'Video diminta di sini.',
+  );
+
+  String canvasUploadFailedMessage(String message) => _tf(
+    'canvasUploadFailedMessage',
+    en: 'Canvas image upload failed, the tutor only received text: $message',
+    id: 'Gambar kanvas gagal diunggah, tutor hanya menerima teks: $message',
+    args: [message],
+  );
+
+  String get imageUnreadableMessage => _t(
+    'imageUnreadableMessage',
+    en: 'The image file could not be read.',
+    id: 'File gambar tidak dapat dibaca.',
+  );
+
+  String get imageTooLargeMessage => _t(
+    'imageTooLargeMessage',
+    en: 'The image must be 10 MB or smaller.',
+    id: 'Ukuran gambar maksimal 10 MB.',
+  );
+
+  String get resumingVideoMessage => _t(
+    'resumingVideoMessage',
+    en: 'Re-attaching to the render in progress...',
+    id: 'Menyambung kembali ke proses render...',
+  );
+
+  String get resumeVideoLabel =>
+      _t('resumeVideoLabel', en: 'Re-attach', id: 'Sambungkan lagi');
+
+  String get tutorOfflineTitle => _t(
+    'tutorOfflineTitle',
+    en: 'AI tutor unavailable',
+    id: 'Tutor AI sedang tidak tersedia',
+  );
+
+  String get tutorOfflineBody => _t(
+    'tutorOfflineBody',
+    en: 'The replies below use fallback text, so your phase will not advance until the tutor is back. Try again shortly.',
+    id: 'Balasan berikut memakai teks cadangan, jadi fase belajar tidak akan maju sampai tutor kembali. Coba lagi sebentar lagi.',
+  );
+
+  String get feedbackCorrectLabel =>
+      _t('feedbackCorrectLabel', en: 'Correct', id: 'Tepat');
+  String get feedbackPartialLabel =>
+      _t('feedbackPartialLabel', en: 'Partly there', id: 'Hampir tepat');
+  String get feedbackIncorrectLabel =>
+      _t('feedbackIncorrectLabel', en: 'Not yet', id: 'Belum tepat');
+  String get misconceptionLabel => _t(
+    'misconceptionLabel',
+    en: 'Misconception detected',
+    id: 'Ada miskonsepsi',
+  );
+
+  String masteryDeltaLabel(double delta) {
+    final rounded = (delta * 100).abs().toStringAsFixed(0);
+    if (delta > 0) {
+      return _tf(
+        'masteryDeltaUpLabel',
+        en: 'Mastery +$rounded%',
+        id: 'Penguasaan +$rounded%',
+        args: [rounded],
       );
     }
-
-    return const _LocalizedWorkspaceMaterial(
-      isIndonesian: false,
-      topicTitle: 'Learning topic',
-      startChatTitle: 'Start learning',
-      startChatBody:
-          'The tutor will guide you from the diagnosis and learning phase stored by the backend.',
-      startChatButtonLabel: 'Start learning chat',
-      loadingDescription:
-          'Connecting this module to the backend learning context.',
-      syncedDescription:
-          'Conversation, canvas, media, and phase state are synced with the backend.',
+    if (delta < 0) {
+      return _tf(
+        'masteryDeltaDownLabel',
+        en: 'Mastery -$rounded%',
+        id: 'Penguasaan -$rounded%',
+        args: [rounded],
+      );
+    }
+    return _t(
+      'masteryDeltaFlatLabel',
+      en: 'Mastery unchanged',
+      id: 'Penguasaan tetap',
     );
   }
+
+  String hintLevelLabel(int level) => _tf(
+    'hintLevelLabel',
+    en: 'Hint level $level',
+    id: 'Tingkat bantuan $level',
+    args: [level],
+  );
+
+  String get whyThisModuleLabel =>
+      _t('whyThisModuleLabel', en: 'Why this module?', id: 'Kenapa modul ini?');
+
+  String get deleteSessionLabel =>
+      _t('deleteSessionLabel', en: 'Delete session', id: 'Hapus sesi');
+
+  String get collapseLabel =>
+      _t('collapseLabel', en: 'Collapse', id: 'Ringkas');
+
+  String get detailsLabel => _t('detailsLabel', en: 'Details', id: 'Detail');
+
+  String finalTargetLabel(String target) => _tf(
+    'finalTargetLabel',
+    en: 'Final target: $target',
+    id: 'Target akhir: $target',
+    args: [target],
+  );
+
+  String get phaseTransitionReadyLabel => _t(
+    'phaseTransitionReadyLabel',
+    en: 'Phase transition ready',
+    id: 'Siap transisi fase',
+  );
+
+  String get continueThisPhaseLabel => _t(
+    'continueThisPhaseLabel',
+    en: 'Continue this phase',
+    id: 'Belajar di fase ini',
+  );
+
+  String get deleteSessionConfirmBody => _t(
+    'deleteSessionConfirmBody',
+    en: 'This chat session will be permanently deleted. Continue?',
+    id: 'Sesi chat ini akan dihapus permanen. Lanjutkan?',
+  );
 }
 
 class _WorkspaceChatPanel extends StatelessWidget {
@@ -1608,6 +2017,15 @@ class _WorkspaceChatPanel extends StatelessWidget {
     required this.onAcceptToolSuggestion,
     required this.onStartChat,
     required this.onOpenCanvas,
+    required this.tutorDegraded,
+    required this.hintLevel,
+    required this.learningContext,
+    required this.imageHeaders,
+    this.lastTutorResponse,
+    this.lastMasteryUpdate,
+    this.canResumeVideo = false,
+    this.onResumeVideo,
+    this.onVideoViewed,
     this.weeklyReport,
     this.onDismissReport,
   });
@@ -1629,6 +2047,15 @@ class _WorkspaceChatPanel extends StatelessWidget {
   final ValueChanged<WorkspaceToolSuggestion> onAcceptToolSuggestion;
   final VoidCallback onStartChat;
   final VoidCallback onOpenCanvas;
+  final bool tutorDegraded;
+  final int hintLevel;
+  final WorkspaceLearningContext? learningContext;
+  final Map<String, String> imageHeaders;
+  final WorkspaceTutorResponse? lastTutorResponse;
+  final WorkspaceMasteryUpdate? lastMasteryUpdate;
+  final bool canResumeVideo;
+  final VoidCallback? onResumeVideo;
+  final VoidCallback? onVideoViewed;
   final WeeklyLearningReport? weeklyReport;
   final VoidCallback? onDismissReport;
 
@@ -1639,7 +2066,15 @@ class _WorkspaceChatPanel extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          SpeechStatusBanner(locale: material.isIndonesian ? 'id-ID' : 'en-US'),
+          SpeechStatusBanner(locale: material.speechLocale),
+          if (tutorDegraded) ...[
+            const SizedBox(height: 10),
+            _TutorOfflineBanner(material: material),
+          ],
+          if (learningContext?.hasDiagnosis ?? false) ...[
+            const SizedBox(height: 10),
+            _LearningContextCard(context: learningContext!, material: material),
+          ],
           // ── Weekly report card (dismissible, shown at top of chat) ────────
           if (weeklyReport != null) ...[
             _WeeklyReportChatCard(
@@ -1687,7 +2122,9 @@ class _WorkspaceChatPanel extends StatelessWidget {
           ),
           for (final entry in chatEntries) ...[
             const SizedBox(height: 9),
-            if (entry.isCanvas)
+            if (entry.isSystemNote)
+              _WorkspaceTranscriptNote(text: entry.text ?? '')
+            else if (entry.snapshot != null)
               Align(
                 alignment: Alignment.centerRight,
                 child: _CanvasSnapshotBubble(
@@ -1696,10 +2133,25 @@ class _WorkspaceChatPanel extends StatelessWidget {
                 ),
               )
             else if (entry.isUser)
-              _WorkspaceBubble(
-                text: entry.text!,
-                isUser: true,
-                locale: material.isIndonesian ? 'id-ID' : 'en-US',
+              Align(
+                alignment: Alignment.centerRight,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    if (entry.imageUrl != null) ...[
+                      _WorkspaceImageAttachment(
+                        imageUrl: entry.imageUrl!,
+                        headers: imageHeaders,
+                      ),
+                      const SizedBox(height: 6),
+                    ],
+                    _WorkspaceBubble(
+                      text: entry.text!,
+                      isUser: true,
+                      locale: material.speechLocale,
+                    ),
+                  ],
+                ),
               )
             else
               _AssistantMessageFrame(
@@ -1709,8 +2161,12 @@ class _WorkspaceChatPanel extends StatelessWidget {
                     _WorkspaceBubble(
                       text: entry.text!,
                       isUser: false,
-                      locale: material.isIndonesian ? 'id-ID' : 'en-US',
+                      locale: material.speechLocale,
                     ),
+                    if (entry.isDegraded) ...[
+                      const SizedBox(height: 6),
+                      _DegradedTurnChip(material: material),
+                    ],
                     if (entry.hasStructuredTutorData) ...[
                       const SizedBox(height: 8),
                       _StructuredTutorData(
@@ -1728,6 +2184,15 @@ class _WorkspaceChatPanel extends StatelessWidget {
                 ),
               ),
           ],
+          if (lastTutorResponse != null || lastMasteryUpdate != null) ...[
+            const SizedBox(height: 12),
+            _TutorFeedbackStrip(
+              response: lastTutorResponse,
+              mastery: lastMasteryUpdate,
+              hintLevel: hintLevel,
+              material: material,
+            ),
+          ],
           if (contentMode == _WorkspaceContentMode.videoProcessing) ...[
             const SizedBox(height: 14),
             _WorkspaceVideoLoadingCard(
@@ -1741,6 +2206,7 @@ class _WorkspaceChatPanel extends StatelessWidget {
               artifact: latestVideoArtifact,
               status: latestVideoStatus,
               material: material,
+              onViewed: onVideoViewed,
             ),
           ] else if (contentMode == _WorkspaceContentMode.videoFailed) ...[
             const SizedBox(height: 14),
@@ -1751,9 +2217,316 @@ class _WorkspaceChatPanel extends StatelessWidget {
                   material.videoGenerationFailedMessage,
               material: material,
               onRetry: onGenerateVideo,
+              onResume: canResumeVideo ? onResumeVideo : null,
             ),
           ],
         ],
+      ),
+    );
+  }
+}
+
+/// Renders a learner-supplied image (canvas snapshot or photo) inside the
+/// transcript, so the drawing survives the server round-trip instead of being
+/// replaced by a text label.
+class _WorkspaceImageAttachment extends StatelessWidget {
+  const _WorkspaceImageAttachment({
+    required this.imageUrl,
+    required this.headers,
+  });
+
+  final String imageUrl;
+
+  /// The asset endpoint is auth-gated; without these the fetch 401s.
+  final Map<String, String> headers;
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(14),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxHeight: 220, maxWidth: 260),
+        child: Image.network(
+          imageUrl,
+          headers: headers,
+          fit: BoxFit.contain,
+          loadingBuilder: (context, child, progress) {
+            if (progress == null) {
+              return child;
+            }
+            return const SizedBox(
+              height: 120,
+              width: 160,
+              child: Center(
+                child: SizedBox(
+                  height: 18,
+                  width: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              ),
+            );
+          },
+          errorBuilder: (context, error, stackTrace) => const SizedBox(
+            height: 120,
+            width: 160,
+            child: Center(child: Icon(Icons.broken_image_outlined)),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A muted, centred marker for non-conversational transcript events.
+class _WorkspaceTranscriptNote extends StatelessWidget {
+  const _WorkspaceTranscriptNote({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Text(
+          text,
+          textAlign: TextAlign.center,
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+            color: WicaraColors.ink.withValues(alpha: 0.55),
+            fontStyle: FontStyle.italic,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _DegradedTurnChip extends StatelessWidget {
+  const _DegradedTurnChip({required this.material});
+
+  final _LocalizedWorkspaceMaterial material;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(Icons.cloud_off_rounded, size: 14),
+        const SizedBox(width: 5),
+        Text(
+          material.tutorOfflineTitle,
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+            color: WicaraColors.ink.withValues(alpha: 0.6),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Tells the learner the tutor is running on fallback text, and — crucially —
+/// that their phase will not advance until it recovers.
+class _TutorOfflineBanner extends StatelessWidget {
+  const _TutorOfflineBanner({required this.material});
+
+  final _LocalizedWorkspaceMaterial material;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: WicaraColors.fieldFill,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: WicaraColors.line, width: 1.2),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Icon(Icons.cloud_off_rounded, size: 18),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    material.tutorOfflineTitle,
+                    style: theme.textTheme.labelLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 3),
+                  Text(
+                    material.tutorOfflineBody,
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Surfaces the judgement the backend already computed for the latest turn:
+/// correctness, misconception, mastery movement and current scaffold level.
+class _TutorFeedbackStrip extends StatelessWidget {
+  const _TutorFeedbackStrip({
+    required this.response,
+    required this.mastery,
+    required this.hintLevel,
+    required this.material,
+  });
+
+  final WorkspaceTutorResponse? response;
+  final WorkspaceMasteryUpdate? mastery;
+  final int hintLevel;
+  final _LocalizedWorkspaceMaterial material;
+
+  @override
+  Widget build(BuildContext context) {
+    final chips = <Widget>[];
+    final tutor = response;
+    if (tutor != null && tutor.isJudged) {
+      chips.add(
+        _FeedbackChip(
+          icon: switch (tutor.correctness) {
+            'correct' => Icons.check_circle_outline_rounded,
+            'partial' => Icons.adjust_rounded,
+            _ => Icons.refresh_rounded,
+          },
+          label: switch (tutor.correctness) {
+            'correct' => material.feedbackCorrectLabel,
+            'partial' => material.feedbackPartialLabel,
+            _ => material.feedbackIncorrectLabel,
+          },
+        ),
+      );
+    }
+    if (tutor?.hasMisconception ?? false) {
+      chips.add(
+        _FeedbackChip(
+          icon: Icons.psychology_alt_outlined,
+          label: material.misconceptionLabel,
+        ),
+      );
+    }
+    final delta = mastery?.delta;
+    if (delta != null && delta != 0) {
+      chips.add(
+        _FeedbackChip(
+          icon: delta > 0
+              ? Icons.trending_up_rounded
+              : Icons.trending_down_rounded,
+          label: material.masteryDeltaLabel(delta),
+        ),
+      );
+    }
+    if (hintLevel > 0) {
+      chips.add(
+        _FeedbackChip(
+          icon: Icons.lightbulb_outline_rounded,
+          label: material.hintLevelLabel(hintLevel),
+        ),
+      );
+    }
+    if (chips.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    return Wrap(spacing: 8, runSpacing: 8, children: chips);
+  }
+}
+
+class _FeedbackChip extends StatelessWidget {
+  const _FeedbackChip({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: WicaraColors.fieldFill,
+        borderRadius: BorderRadius.circular(30),
+        border: Border.all(color: WicaraColors.line),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 15, color: WicaraColors.secondary),
+            const SizedBox(width: 6),
+            Text(label, style: Theme.of(context).textTheme.labelSmall),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Explains why the learner is in this module rather than their original
+/// target — the routing rationale the backend computes but never showed.
+class _LearningContextCard extends StatelessWidget {
+  const _LearningContextCard({required this.context, required this.material});
+
+  final WorkspaceLearningContext context;
+  final _LocalizedWorkspaceMaterial material;
+
+  @override
+  Widget build(BuildContext buildContext) {
+    final theme = Theme.of(buildContext);
+    final target = context.originalTargetLabel.trim();
+    final showTarget =
+        target.isNotEmpty &&
+        target.toLowerCase() != context.currentModuleLabel.trim().toLowerCase();
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: WicaraColors.line, width: 1.2),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(
+                  Icons.alt_route_rounded,
+                  size: 17,
+                  color: WicaraColors.secondary,
+                ),
+                const SizedBox(width: 7),
+                Text(
+                  material.whyThisModuleLabel,
+                  style: theme.textTheme.labelLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+            if (context.diagnosisReason.isNotEmpty) ...[
+              const SizedBox(height: 6),
+              Text(context.diagnosisReason, style: theme.textTheme.bodySmall),
+            ],
+            if (showTarget) ...[
+              const SizedBox(height: 6),
+              Text(
+                material.finalTargetLabel(target),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: WicaraColors.ink.withValues(alpha: 0.65),
+                ),
+              ),
+            ],
+          ],
+        ),
       ),
     );
   }
@@ -2473,11 +3246,15 @@ class _GeneratedWorkspaceVideoCard extends StatelessWidget {
     required this.material,
     this.artifact,
     this.status,
+    this.onViewed,
   });
 
   final _LocalizedWorkspaceMaterial material;
   final WorkspaceMediaArtifact? artifact;
   final WorkspaceAnimationJobStatus? status;
+
+  /// Fired when playback actually starts, so engagement is measurable.
+  final VoidCallback? onViewed;
 
   @override
   Widget build(BuildContext context) {
@@ -2609,6 +3386,7 @@ class _GeneratedWorkspaceVideoCard extends StatelessWidget {
                                   context,
                                 )?.stop(),
                               );
+                              onViewed?.call();
                               showDialog<void>(
                                 context: context,
                                 builder: (context) {
@@ -2699,11 +3477,16 @@ class _WorkspaceVideoFailedCard extends StatelessWidget {
     required this.errorMessage,
     required this.material,
     required this.onRetry,
+    this.onResume,
   });
 
   final String errorMessage;
   final _LocalizedWorkspaceMaterial material;
   final VoidCallback onRetry;
+
+  /// Set when a render is still in flight (e.g. after a polling timeout), so
+  /// the learner can re-attach instead of paying to generate it again.
+  final VoidCallback? onResume;
 
   @override
   Widget build(BuildContext context) {
@@ -2722,10 +3505,22 @@ class _WorkspaceVideoFailedCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 12),
-          OutlinedButton.icon(
-            onPressed: onRetry,
-            icon: const Icon(Icons.refresh_rounded),
-            label: Text(material.retryGenerateVideoLabel),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              if (onResume != null)
+                FilledButton.icon(
+                  onPressed: onResume,
+                  icon: const Icon(Icons.link_rounded),
+                  label: Text(material.resumeVideoLabel),
+                ),
+              OutlinedButton.icon(
+                onPressed: onRetry,
+                icon: const Icon(Icons.refresh_rounded),
+                label: Text(material.retryGenerateVideoLabel),
+              ),
+            ],
           ),
         ],
       ),
@@ -3430,12 +4225,8 @@ class _WorkspaceCompactHeaderStatus extends StatelessWidget {
         ? WicaraColors.secondaryLight
         : WicaraColors.line;
     final statusText = phaseTransitionPending
-        ? (material.isIndonesian
-              ? 'Siap transisi fase'
-              : 'Phase transition ready')
-        : (material.isIndonesian
-              ? 'Belajar di fase ini'
-              : 'Continue this phase');
+        ? material.phaseTransitionReadyLabel
+        : material.continueThisPhaseLabel;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
       decoration: BoxDecoration(
@@ -3482,24 +4273,38 @@ class _WorkspaceFooter extends StatelessWidget {
   const _WorkspaceFooter({
     required this.controller,
     required this.onSend,
-    required this.onAdvancePhase,
-    required this.onGenerateVideo,
-    required this.canAdvancePhase,
+    required this.onConfirmPhase,
+    required this.onStayInPhase,
+    required this.showPhaseCheckpoint,
+    required this.currentPhase,
+    required this.phaseCheckpointQuestion,
+    required this.isSending,
     required this.isPhaseSubmitting,
-    required this.isVideoGenerating,
-    required this.canGenerateVideo,
+    required this.onOpenCanvas,
+    required this.onAttachImage,
+    required this.onRemoveAttachment,
+    required this.pendingAttachmentBytes,
+    required this.pendingAttachmentName,
+    required this.isUploadingAttachment,
     required this.copy,
     required this.material,
   });
 
   final TextEditingController controller;
   final VoidCallback onSend;
-  final VoidCallback onAdvancePhase;
-  final VoidCallback onGenerateVideo;
-  final bool canAdvancePhase;
+  final VoidCallback onConfirmPhase;
+  final VoidCallback onStayInPhase;
+  final bool showPhaseCheckpoint;
+  final String currentPhase;
+  final String phaseCheckpointQuestion;
+  final bool isSending;
   final bool isPhaseSubmitting;
-  final bool isVideoGenerating;
-  final bool canGenerateVideo;
+  final VoidCallback onOpenCanvas;
+  final VoidCallback onAttachImage;
+  final VoidCallback onRemoveAttachment;
+  final Uint8List? pendingAttachmentBytes;
+  final String? pendingAttachmentName;
+  final bool isUploadingAttachment;
   final OnboardingCopy copy;
   final _LocalizedWorkspaceMaterial material;
 
@@ -3523,59 +4328,90 @@ class _WorkspaceFooter extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: canAdvancePhase && !isPhaseSubmitting
-                        ? onAdvancePhase
-                        : null,
-                    icon: Icon(
-                      isPhaseSubmitting
-                          ? Icons.hourglass_bottom_rounded
-                          : Icons.skip_next_rounded,
-                    ),
-                    label: Text(
-                      isPhaseSubmitting
-                          ? material.advancingPhaseLabel
-                          : material.advancePhaseLabel,
-                    ),
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size.fromHeight(44),
-                      padding: const EdgeInsets.symmetric(horizontal: 10),
-                    ),
-                  ),
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 220),
+              transitionBuilder: (child, animation) => FadeTransition(
+                opacity: animation,
+                child: SizeTransition(
+                  sizeFactor: animation,
+                  axisAlignment: 1,
+                  child: child,
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: !isVideoGenerating && canGenerateVideo
-                        ? onGenerateVideo
-                        : null,
-                    icon: Icon(
-                      isVideoGenerating
-                          ? Icons.hourglass_bottom_rounded
-                          : Icons.smart_display_rounded,
+              ),
+              child: showPhaseCheckpoint
+                  ? Padding(
+                      key: ValueKey('phase-checkpoint-$currentPhase'),
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text(
+                            phaseCheckpointQuestion,
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context).textTheme.bodyMedium
+                                ?.copyWith(fontWeight: FontWeight.w700),
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: OutlinedButton(
+                                  onPressed: onStayInPhase,
+                                  child: Text(material.stayInPhaseLabel),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: FilledButton(
+                                  onPressed: onConfirmPhase,
+                                  child: Text(material.confirmPhaseLabel),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    )
+                  : const SizedBox.shrink(
+                      key: ValueKey('phase-checkpoint-hidden'),
                     ),
-                    label: Text(
-                      isVideoGenerating
-                          ? material.generatingVideoButtonLabel
-                          : material.generateVideoFromChatLabel,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size.fromHeight(44),
-                      padding: const EdgeInsets.symmetric(horizontal: 10),
-                    ),
-                  ),
-                ),
-              ],
             ),
-            const SizedBox(height: 8),
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 180),
+              child: isPhaseSubmitting
+                  ? Padding(
+                      key: const ValueKey('automatic-phase-transition'),
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const SizedBox.square(
+                            dimension: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                          const SizedBox(width: 9),
+                          Text(
+                            material.advancingPhaseLabel,
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(fontWeight: FontWeight.w700),
+                          ),
+                        ],
+                      ),
+                    )
+                  : const SizedBox.shrink(
+                      key: ValueKey('automatic-phase-idle'),
+                    ),
+            ),
             _WorkspaceComposerInput(
               controller: controller,
               onSend: onSend,
+              isSending: isSending,
+              onOpenCanvas: onOpenCanvas,
+              onAttachImage: onAttachImage,
+              onRemoveAttachment: onRemoveAttachment,
+              pendingAttachmentBytes: pendingAttachmentBytes,
+              pendingAttachmentName: pendingAttachmentName,
+              isUploadingAttachment: isUploadingAttachment,
               copy: copy,
             ),
           ],
@@ -3589,11 +4425,28 @@ class _WorkspaceComposerInput extends StatelessWidget {
   const _WorkspaceComposerInput({
     required this.controller,
     required this.onSend,
+    required this.isSending,
+    required this.onOpenCanvas,
+    required this.onAttachImage,
+    required this.onRemoveAttachment,
+    required this.pendingAttachmentBytes,
+    required this.pendingAttachmentName,
+    required this.isUploadingAttachment,
     required this.copy,
   });
 
   final TextEditingController controller;
   final VoidCallback onSend;
+
+  /// Blocks a second submit while one is in flight: two concurrent appends
+  /// collide on the server's per-session event index.
+  final bool isSending;
+  final VoidCallback onOpenCanvas;
+  final VoidCallback onAttachImage;
+  final VoidCallback onRemoveAttachment;
+  final Uint8List? pendingAttachmentBytes;
+  final String? pendingAttachmentName;
+  final bool isUploadingAttachment;
   final OnboardingCopy copy;
 
   @override
@@ -3601,8 +4454,70 @@ class _WorkspaceComposerInput extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (pendingAttachmentBytes != null) ...[
+          Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: WicaraColors.fieldFill,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: WicaraColors.secondaryLight),
+            ),
+            child: Row(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.memory(
+                    pendingAttachmentBytes!,
+                    height: 52,
+                    width: 68,
+                    fit: BoxFit.cover,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    pendingAttachmentName ?? copy.uploadWorkImageLabel,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Remove attachment',
+                  onPressed: isSending || isUploadingAttachment
+                      ? null
+                      : onRemoveAttachment,
+                  icon: const Icon(Icons.close_rounded),
+                ),
+              ],
+            ),
+          ),
+        ],
         Row(
           children: [
+            IconButton(
+              tooltip: copy.canvasLabel,
+              onPressed: isSending || isUploadingAttachment
+                  ? null
+                  : onOpenCanvas,
+              icon: const Icon(Icons.draw_rounded),
+            ),
+            IconButton(
+              tooltip: copy.uploadWorkImageLabel,
+              onPressed: isSending || isUploadingAttachment
+                  ? null
+                  : onAttachImage,
+              icon: isUploadingAttachment
+                  ? const SizedBox(
+                      height: 18,
+                      width: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.image_outlined),
+            ),
             Expanded(
               child: TextField(
                 controller: controller,
@@ -3610,7 +4525,8 @@ class _WorkspaceComposerInput extends StatelessWidget {
                 minLines: 1,
                 maxLines: 4,
                 textInputAction: TextInputAction.send,
-                onSubmitted: (_) => onSend(),
+                enabled: !isSending,
+                onSubmitted: isSending ? null : (_) => onSend(),
                 decoration: InputDecoration(
                   hintText: copy.askOrReflectHereHint,
                   filled: true,
@@ -3645,7 +4561,9 @@ class _WorkspaceComposerInput extends StatelessWidget {
               width: 49,
               height: 49,
               decoration: BoxDecoration(
-                color: WicaraColors.secondary,
+                color: isSending
+                    ? WicaraColors.secondary.withValues(alpha: 0.55)
+                    : WicaraColors.secondary,
                 borderRadius: BorderRadius.circular(27),
                 boxShadow: [
                   BoxShadow(
@@ -3656,8 +4574,17 @@ class _WorkspaceComposerInput extends StatelessWidget {
                 ],
               ),
               child: IconButton(
-                onPressed: onSend,
-                icon: const Icon(Icons.arrow_upward_rounded),
+                onPressed: isSending ? null : onSend,
+                icon: isSending
+                    ? const SizedBox(
+                        height: 18,
+                        width: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Icon(Icons.arrow_upward_rounded),
                 color: Colors.white,
               ),
             ),
@@ -3667,7 +4594,7 @@ class _WorkspaceComposerInput extends StatelessWidget {
         Align(
           alignment: Alignment.centerLeft,
           child: MicrophoneToggle(
-            locale: copy.isIndonesian ? 'id-ID' : 'en-US',
+            locale: copy.speechLocale,
             onTranscript: _insertTranscript,
           ),
         ),
@@ -3784,6 +4711,7 @@ class _WeeklyReportChatCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final copy = WicaraCopyScope.of(context);
     final score = report.score;
     final fixed = report.fixedGaps;
     final remaining = report.remainingGaps;
@@ -3832,7 +4760,7 @@ class _WeeklyReportChatCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'Weekly Report',
+                      copy.weeklyReportLabel,
                       style: TextStyle(
                         fontSize: 12,
                         fontWeight: FontWeight.w800,
@@ -3871,19 +4799,19 @@ class _WeeklyReportChatCard extends StatelessWidget {
             children: [
               _ReportStat(
                 value: score > 0 ? '$score%' : '--',
-                label: 'Score',
+                label: copy.scoreLabel,
                 color: WicaraColors.primary,
               ),
               const SizedBox(width: 8),
               _ReportStat(
                 value: '+$fixed',
-                label: 'Fixed gaps',
+                label: copy.fixedGapsLabel,
                 color: WicaraColors.accentMint,
               ),
               const SizedBox(width: 8),
               _ReportStat(
                 value: '$remaining',
-                label: 'Remaining',
+                label: copy.remainingLabel,
                 color: remaining > 0
                     ? const Color(0xFFF4A44E)
                     : WicaraColors.accentMint,
@@ -3891,7 +4819,7 @@ class _WeeklyReportChatCard extends StatelessWidget {
               const SizedBox(width: 8),
               _ReportStat(
                 value: '${minutes}m',
-                label: 'Retention',
+                label: copy.retentionLabel,
                 color: WicaraColors.primaryDeep,
               ),
             ],

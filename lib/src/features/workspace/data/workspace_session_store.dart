@@ -2,74 +2,58 @@ import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
 
-class WorkspaceSessionHistory {
-  const WorkspaceSessionHistory({
-    required this.activeWorkspaceId,
-    required this.workspaceIds,
-  });
-
-  final String? activeWorkspaceId;
-  final List<String> workspaceIds;
-}
+import '../domain/workspace_models.dart';
 
 class WorkspaceSessionStore {
   static const _legacyTrackIdKey = 'workspace.track_id';
   static const _legacyModuleIdKey = 'workspace.module_id';
   static const _legacyWorkspaceIdKey = 'workspace.workspace_id';
   static const _legacySessionsMapKey = 'workspace.sessions_map';
-  static const _sessionsStateKey = 'workspace.sessions_state_v2';
+  static const _legacySessionsStateKey = 'workspace.sessions_state_v2';
+  static const _activeSessionsKey = 'workspace.active_sessions_v3';
 
-  final Map<String, _SessionHistoryState> _sessions = {};
+  final Map<String, String> _activeWorkspaceIds = {};
 
   Future<void> read() async {
     final preferences = await SharedPreferences.getInstance();
 
     final legacyTrack = preferences.getString(_legacyTrackIdKey)?.trim();
     final legacyModule = preferences.getString(_legacyModuleIdKey)?.trim();
-    final legacyWorkspace =
-        preferences.getString(_legacyWorkspaceIdKey)?.trim();
+    final legacyWorkspace = preferences.getString(_legacyWorkspaceIdKey)?.trim();
     if (legacyTrack != null &&
         legacyTrack.isNotEmpty &&
         legacyModule != null &&
         legacyModule.isNotEmpty &&
         legacyWorkspace != null &&
         legacyWorkspace.isNotEmpty) {
-      final key = _key(legacyTrack, legacyModule);
-      _sessions[key] = _SessionHistoryState.fromWorkspaceId(legacyWorkspace);
+      _activeWorkspaceIds[_key(legacyTrack, legacyModule)] = legacyWorkspace;
       await preferences.remove(_legacyTrackIdKey);
       await preferences.remove(_legacyModuleIdKey);
       await preferences.remove(_legacyWorkspaceIdKey);
     }
 
-    final legacyMapRaw = preferences.getString(_legacySessionsMapKey);
-    if (legacyMapRaw != null && legacyMapRaw.isNotEmpty) {
-      try {
-        final decoded = jsonDecode(legacyMapRaw) as Map<String, dynamic>;
-        for (final entry in decoded.entries) {
-          final workspaceId = (entry.value ?? '').toString().trim();
-          if (workspaceId.isEmpty) {
-            continue;
-          }
-          _sessions.putIfAbsent(
-            entry.key,
-            () => _SessionHistoryState.fromWorkspaceId(workspaceId),
-          );
-        }
-      } catch (_) {
-        // Ignore invalid legacy data.
-      }
-      await preferences.remove(_legacySessionsMapKey);
-    }
+    _migrateLegacyMap(
+      preferences.getString(_legacySessionsMapKey),
+      readId: (value) => (value ?? '').toString().trim(),
+    );
+    await preferences.remove(_legacySessionsMapKey);
 
-    final raw = preferences.getString(_sessionsStateKey);
+    _migrateLegacyMap(
+      preferences.getString(_legacySessionsStateKey),
+      readId: (value) => value is Map<String, dynamic>
+          ? (value['active_workspace_id'] ?? '').toString().trim()
+          : '',
+    );
+    await preferences.remove(_legacySessionsStateKey);
+
+    final raw = preferences.getString(_activeSessionsKey);
     if (raw != null && raw.isNotEmpty) {
       try {
         final decoded = jsonDecode(raw) as Map<String, dynamic>;
         for (final entry in decoded.entries) {
-          if (entry.value is Map<String, dynamic>) {
-            _sessions[entry.key] = _SessionHistoryState.fromJson(
-              entry.value as Map<String, dynamic>,
-            );
+          final id = (entry.value ?? '').toString().trim();
+          if (id.isNotEmpty) {
+            _activeWorkspaceIds[entry.key] = id;
           }
         }
       } catch (_) {
@@ -80,11 +64,28 @@ class WorkspaceSessionStore {
     await _persist();
   }
 
-  String? workspaceIdFor({
-    required String trackId,
-    required String moduleId,
+  void _migrateLegacyMap(
+    String? raw, {
+    required String Function(Object? value) readId,
   }) {
-    final id = _sessions[_key(trackId, moduleId)]?.activeWorkspaceId;
+    if (raw == null || raw.isEmpty) {
+      return;
+    }
+    try {
+      final decoded = jsonDecode(raw) as Map<String, dynamic>;
+      for (final entry in decoded.entries) {
+        final id = readId(entry.value);
+        if (id.isNotEmpty) {
+          _activeWorkspaceIds.putIfAbsent(entry.key, () => id);
+        }
+      }
+    } catch (_) {
+      // Ignore invalid legacy data.
+    }
+  }
+
+  String? workspaceIdFor({required String trackId, required String moduleId}) {
+    final id = _activeWorkspaceIds[_key(trackId, moduleId)];
     return (id == null || id.isEmpty) ? null : id;
   }
 
@@ -92,10 +93,8 @@ class WorkspaceSessionStore {
     required String trackId,
     required String moduleId,
   }) {
-    final state = _sessions[_key(trackId, moduleId)];
     return WorkspaceSessionHistory(
-      activeWorkspaceId: state?.activeWorkspaceId,
-      workspaceIds: List.unmodifiable(state?.workspaceIds ?? const <String>[]),
+      activeWorkspaceId: workspaceIdFor(trackId: trackId, moduleId: moduleId),
     );
   }
 
@@ -103,11 +102,12 @@ class WorkspaceSessionStore {
     required String trackId,
     required String moduleId,
     required String workspaceId,
-  }) async {
-    final k = _key(trackId, moduleId);
-    final state = _sessions[k] ?? _SessionHistoryState.empty();
-    _sessions[k] = state.withActiveWorkspace(workspaceId);
-    await _persist();
+  }) {
+    return setActiveWorkspaceId(
+      trackId: trackId,
+      moduleId: moduleId,
+      workspaceId: workspaceId,
+    );
   }
 
   Future<void> setActiveWorkspaceId({
@@ -115,9 +115,11 @@ class WorkspaceSessionStore {
     required String moduleId,
     required String workspaceId,
   }) async {
-    final k = _key(trackId, moduleId);
-    final current = _sessions[k] ?? _SessionHistoryState.empty();
-    _sessions[k] = current.withActiveWorkspace(workspaceId);
+    final normalized = workspaceId.trim();
+    if (normalized.isEmpty) {
+      return;
+    }
+    _activeWorkspaceIds[_key(trackId, moduleId)] = normalized;
     await _persist();
   }
 
@@ -125,12 +127,14 @@ class WorkspaceSessionStore {
     required String trackId,
     required String moduleId,
   }) async {
-    _sessions.remove(_key(trackId, moduleId));
+    _activeWorkspaceIds.remove(_key(trackId, moduleId));
     await _persist();
   }
 
+  /// Forgets every cached pointer. Must be called on sign-out, otherwise the
+  /// next account inherits ids it does not own and every open 404s.
   Future<void> clearAll() async {
-    _sessions.clear();
+    _activeWorkspaceIds.clear();
     await _persist();
   }
 
@@ -139,77 +143,11 @@ class WorkspaceSessionStore {
 
   Future<void> _persist() async {
     final preferences = await SharedPreferences.getInstance();
-    final payload = _sessions.map(
-      (key, value) => MapEntry(key, value.toJson()),
+    await preferences.setString(
+      _activeSessionsKey,
+      jsonEncode(_activeWorkspaceIds),
     );
-    await preferences.setString(_sessionsStateKey, jsonEncode(payload));
   }
 }
 
 final workspaceSessionStore = WorkspaceSessionStore();
-
-class _SessionHistoryState {
-  const _SessionHistoryState({
-    required this.activeWorkspaceId,
-    required this.workspaceIds,
-  });
-
-  factory _SessionHistoryState.empty() {
-    return const _SessionHistoryState(activeWorkspaceId: null, workspaceIds: []);
-  }
-
-  factory _SessionHistoryState.fromWorkspaceId(String workspaceId) {
-    return _SessionHistoryState(
-      activeWorkspaceId: workspaceId,
-      workspaceIds: [workspaceId],
-    );
-  }
-
-  factory _SessionHistoryState.fromJson(Map<String, dynamic> json) {
-    final active = (json['active_workspace_id'] ?? '').toString().trim();
-    final rawList = json['workspace_ids'];
-    final ids = <String>[];
-    if (rawList is List) {
-      for (final value in rawList) {
-        final id = (value ?? '').toString().trim();
-        if (id.isNotEmpty && !ids.contains(id)) {
-          ids.add(id);
-        }
-      }
-    }
-    if (active.isNotEmpty && !ids.contains(active)) {
-      ids.insert(0, active);
-    }
-    return _SessionHistoryState(
-      activeWorkspaceId: active.isEmpty ? null : active,
-      workspaceIds: ids,
-    );
-  }
-
-  final String? activeWorkspaceId;
-  final List<String> workspaceIds;
-
-  _SessionHistoryState withActiveWorkspace(String workspaceId) {
-    final normalized = workspaceId.trim();
-    if (normalized.isEmpty) {
-      return this;
-    }
-    final nextIds = <String>[normalized];
-    for (final id in workspaceIds) {
-      if (id != normalized) {
-        nextIds.add(id);
-      }
-    }
-    return _SessionHistoryState(
-      activeWorkspaceId: normalized,
-      workspaceIds: nextIds,
-    );
-  }
-
-  Map<String, dynamic> toJson() {
-    return {
-      'active_workspace_id': activeWorkspaceId ?? '',
-      'workspace_ids': workspaceIds,
-    };
-  }
-}

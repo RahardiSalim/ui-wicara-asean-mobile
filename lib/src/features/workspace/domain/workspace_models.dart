@@ -20,6 +20,7 @@ class WorkspaceCompletionResult {
     required this.moduleCompleted,
     required this.requestedEarlyPosttest,
     this.workspaceSessionId,
+    this.posttestSessionId,
   });
 
   final String trackId;
@@ -28,6 +29,7 @@ class WorkspaceCompletionResult {
   final bool moduleCompleted;
   final bool requestedEarlyPosttest;
   final String? workspaceSessionId;
+  final String? posttestSessionId;
 }
 
 class WorkspaceSession {
@@ -47,8 +49,10 @@ class WorkspaceSession {
     this.learningContext = const WorkspaceLearningContext(),
     this.phaseEvidence = const <String, List<Map<String, dynamic>>>{},
     this.hintLevel = 0,
+    this.tutorDegraded = false,
     this.posttestTrigger,
     this.latestMedia,
+    this.lastImageAssetId,
   });
 
   final String id;
@@ -66,8 +70,10 @@ class WorkspaceSession {
   final WorkspaceLearningContext learningContext;
   final Map<String, List<Map<String, dynamic>>> phaseEvidence;
   final int hintLevel;
+  final bool tutorDegraded;
   final WorkspacePosttestTrigger? posttestTrigger;
   final WorkspaceMediaArtifact? latestMedia;
+  final String? lastImageAssetId;
 }
 
 class WorkspaceLearningContext {
@@ -129,6 +135,17 @@ class WorkspacePosttestTrigger {
   final String? error;
 
   bool get isReady => status.toLowerCase() == 'ready';
+  bool get isGenerating => status.toLowerCase() == 'generating';
+  bool get isFailed => status.toLowerCase() == 'error';
+}
+
+/// Locally cached pointer to the workspace the learner was last in, for a
+/// given track+module. The server remains authoritative for which sessions
+/// exist; this only says where to resume.
+class WorkspaceSessionHistory {
+  const WorkspaceSessionHistory({required this.activeWorkspaceId});
+
+  final String? activeWorkspaceId;
 }
 
 class WorkspaceSessionSummary {
@@ -162,6 +179,10 @@ class WorkspaceEvent {
     required this.actorType,
     required this.textPayload,
     required this.metadata,
+    this.imageAssetId,
+    this.mediaArtifactId,
+    this.inputEventId,
+    this.createdAt,
   });
 
   final String id;
@@ -171,8 +192,17 @@ class WorkspaceEvent {
   final String actorType;
   final String textPayload;
   final Map<String, dynamic> metadata;
+  final String? imageAssetId;
+  final String? mediaArtifactId;
+  final String? inputEventId;
+  final DateTime? createdAt;
 
   bool get isLearner => actorType == 'learner';
+
+  bool get hasImage => (imageAssetId ?? '').isNotEmpty;
+
+  /// True when the tutor turn came from the deterministic offline fallback.
+  bool get isDegradedTutorTurn => metadata['degraded'] == true;
 
   List<String> get tutorNextActions {
     final value = metadata['next_actions'];
@@ -187,6 +217,11 @@ class WorkspaceEvent {
 
   Map<String, dynamic>? get tutorExplanationCard =>
       _structuredTutorMetadata('explanation_card');
+
+  String? get tutorPhaseCheckpointQuestion =>
+      _nonEmptyMetadataString('phase_checkpoint_question');
+
+  String? get tutorPhaseReasoning => _nonEmptyMetadataString('phase_reasoning');
 
   WorkspaceToolSuggestion? get tutorToolSuggestion {
     final value = _structuredTutorMetadata('tool_suggestion');
@@ -218,6 +253,7 @@ class WorkspaceTutorResponse {
     required this.nextActions,
     required this.nextPhaseReady,
     this.phaseReasoning,
+    this.phaseCheckpointQuestion,
     this.evidenceTags = const [],
     this.correctness = 'unknown',
     this.misconceptionStatus = 'none',
@@ -226,6 +262,7 @@ class WorkspaceTutorResponse {
     this.scaffoldLevel = 0,
     this.evidenceRequest,
     this.explanationCard,
+    this.degraded = false,
     this.toolSuggestion,
   });
 
@@ -234,6 +271,7 @@ class WorkspaceTutorResponse {
   final List<String> nextActions;
   final bool nextPhaseReady;
   final String? phaseReasoning;
+  final String? phaseCheckpointQuestion;
   final List<String> evidenceTags;
   final String correctness;
   final String misconceptionStatus;
@@ -242,7 +280,12 @@ class WorkspaceTutorResponse {
   final int scaffoldLevel;
   final Map<String, dynamic>? evidenceRequest;
   final Map<String, dynamic>? explanationCard;
+  final bool degraded;
   final WorkspaceToolSuggestion? toolSuggestion;
+
+  bool get isJudged => correctness != 'unknown';
+  bool get hasMisconception =>
+      misconceptionStatus == 'suspected' || misconceptionStatus == 'active';
 }
 
 class WorkspaceToolSuggestion {

@@ -2,6 +2,7 @@ import '../../../core/network/api_client.dart';
 import '../../auth/data/auth_session_store.dart';
 import '../domain/onboarding_profile.dart';
 import '../domain/onboarding_repository.dart';
+import '../../../core/localization/app_language.dart';
 
 class ApiOnboardingRepository implements OnboardingRepository {
   const ApiOnboardingRepository({
@@ -17,7 +18,7 @@ class ApiOnboardingRepository implements OnboardingRepository {
   Future<void> saveProfile(OnboardingProfile profile) async {
     final token = _sessionStore.accessToken;
     if (token == null || token.isEmpty) {
-      throw const OnboardingException('Please log in before onboarding.');
+      throw OnboardingException(AppLanguage.copy.loginBeforeOnboardingLabel);
     }
 
     try {

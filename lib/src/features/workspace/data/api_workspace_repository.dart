@@ -1,8 +1,11 @@
+import 'dart:typed_data';
+
 import '../../../core/network/api_client.dart';
 import '../../auth/data/auth_session_store.dart';
 import '../domain/workspace_models.dart';
 import '../domain/workspace_repository.dart';
 import 'workspace_session_store.dart' as store;
+import '../../../core/localization/app_language.dart';
 
 class ApiWorkspaceRepository implements WorkspaceRepository {
   const ApiWorkspaceRepository({
@@ -54,15 +57,25 @@ class ApiWorkspaceRepository implements WorkspaceRepository {
     required String trackId,
     required String moduleId,
   }) {
-    final history = _workspaceSessionStore.sessionHistoryFor(
+    return _workspaceSessionStore.sessionHistoryFor(
       trackId: trackId,
       moduleId: moduleId,
     );
-    return WorkspaceSessionHistory(
-      activeWorkspaceId: history.activeWorkspaceId,
-      workspaceIds: history.workspaceIds,
+  }
+
+  @override
+  Future<void> clearCachedSession({
+    required String trackId,
+    required String moduleId,
+  }) {
+    return _workspaceSessionStore.clearSession(
+      trackId: trackId,
+      moduleId: moduleId,
     );
   }
+
+  @override
+  Future<void> clearLocalSessions() => _workspaceSessionStore.clearAll();
 
   @override
   Future<void> setActiveSession({
@@ -81,13 +94,20 @@ class ApiWorkspaceRepository implements WorkspaceRepository {
   Future<List<WorkspaceSessionSummary>> fetchSessionHistory({
     required String trackId,
     required String moduleId,
+    int limit = 20,
+    int offset = 0,
   }) async {
     final token = _requireToken();
     try {
       final json = await _apiClient.getJson(
         '/api/v1/workspaces',
         headers: {'Authorization': 'Bearer $token'},
-        queryParameters: {'track_id': trackId, 'module_id': moduleId},
+        queryParameters: {
+          'track_id': trackId,
+          'module_id': moduleId,
+          'limit': '$limit',
+          'offset': '$offset',
+        },
       );
       final sessions = json['sessions'];
       return sessions is List
@@ -99,6 +119,73 @@ class ApiWorkspaceRepository implements WorkspaceRepository {
     } on ApiClientException catch (error) {
       throw WorkspaceException(error.message);
     }
+  }
+
+  @override
+  Future<void> deleteSession({
+    required String trackId,
+    required String moduleId,
+    required String workspaceId,
+  }) async {
+    final token = _requireToken();
+    try {
+      await _apiClient.delete(
+        '/api/v1/workspaces/$workspaceId',
+        headers: {'Authorization': 'Bearer $token'},
+      );
+    } on ApiClientException catch (error) {
+      throw WorkspaceException(error.message);
+    }
+    if (_workspaceSessionStore.workspaceIdFor(
+          trackId: trackId,
+          moduleId: moduleId,
+        ) ==
+        workspaceId) {
+      await _workspaceSessionStore.clearSession(
+        trackId: trackId,
+        moduleId: moduleId,
+      );
+    }
+  }
+
+  @override
+  Future<String> uploadCanvasImage({
+    required Uint8List bytes,
+    String filename = 'canvas.png',
+    String mimeType = 'image/png',
+  }) async {
+    final token = _requireToken();
+    try {
+      final json = await _apiClient.postMultipartBytes(
+        '/api/v1/evidence/image-assets/upload',
+        bytes: bytes,
+        filename: filename,
+        mimeType: mimeType,
+        headers: {'Authorization': 'Bearer $token'},
+      );
+      final assetId = _nullableString(json['id']);
+      if (assetId == null) {
+        throw WorkspaceException(AppLanguage.copy.noImageAssetIdLabel);
+      }
+      return assetId;
+    } on ApiClientException catch (error) {
+      throw WorkspaceException(error.message);
+    }
+  }
+
+  @override
+  String imageAssetUrl(String imageAssetId) {
+    return Uri.parse(
+      _apiClient.baseUrl,
+    ).resolve('/api/v1/evidence/image-assets/$imageAssetId/file').toString();
+  }
+
+  @override
+  Map<String, String> imageAssetHeaders() {
+    final token = _sessionStore.accessToken;
+    return (token == null || token.isEmpty)
+        ? const {}
+        : {'Authorization': 'Bearer $token'};
   }
 
   @override
@@ -122,6 +209,7 @@ class ApiWorkspaceRepository implements WorkspaceRepository {
     required String eventType,
     String textPayload = '',
     Map<String, dynamic> metadata = const {},
+    String? imageAssetId,
   }) async {
     final token = _requireToken();
     try {
@@ -133,6 +221,8 @@ class ApiWorkspaceRepository implements WorkspaceRepository {
           'actor_type': 'learner',
           'text_payload': textPayload,
           'metadata': metadata,
+          if (_nullableString(imageAssetId) != null)
+            'image_asset_id': _nullableString(imageAssetId),
         },
       );
       return appendResultFromJson(json);
@@ -255,7 +345,7 @@ class ApiWorkspaceRepository implements WorkspaceRepository {
   String _requireToken() {
     final token = _sessionStore.accessToken;
     if (token == null || token.isEmpty) {
-      throw const WorkspaceException('Please log in before opening workspace.');
+      throw WorkspaceException(AppLanguage.copy.loginBeforeWorkspaceLabel);
     }
     return token;
   }
@@ -300,6 +390,8 @@ WorkspaceSession workspaceFromJson(Map<String, dynamic> json) {
       json['phase_evidence'] ?? learningContextJson['phase_evidence'],
     ),
     hintLevel: _int(json['hint_level'] ?? learningContextJson['hint_level']),
+    tutorDegraded: _bool(json['tutor_degraded']),
+    lastImageAssetId: _nullableString(json['last_image_asset_id']),
     posttestTrigger: json['posttest_trigger'] is Map<String, dynamic>
         ? _workspacePosttestTriggerFromJson(
             json['posttest_trigger'] as Map<String, dynamic>,
@@ -327,6 +419,10 @@ WorkspaceEvent workspaceEventFromJson(Map<String, dynamic> json) {
     actorType: _string(json['actor_type']),
     textPayload: _string(json['text_payload']),
     metadata: metadata is Map<String, dynamic> ? metadata : const {},
+    imageAssetId: _nullableString(json['image_asset_id']),
+    mediaArtifactId: _nullableString(json['media_artifact_id']),
+    inputEventId: _nullableString(json['input_event_id']),
+    createdAt: _dateTimeOrNull(json['created_at']),
   );
 }
 
@@ -345,6 +441,9 @@ WorkspaceAppendResult appendResultFromJson(Map<String, dynamic> json) {
             ),
             nextPhaseReady: _bool(tutorResponse['next_phase_ready']),
             phaseReasoning: _nullableString(tutorResponse['phase_reasoning']),
+            phaseCheckpointQuestion: _nullableString(
+              tutorResponse['phase_checkpoint_question'],
+            ),
             evidenceTags: _stringList(tutorResponse['evidence_tags']),
             correctness: _string(tutorResponse['correctness']).isEmpty
                 ? 'unknown'
@@ -366,6 +465,7 @@ WorkspaceAppendResult appendResultFromJson(Map<String, dynamic> json) {
                 tutorResponse['explanation_card'] is Map<String, dynamic>
                 ? tutorResponse['explanation_card'] as Map<String, dynamic>
                 : null,
+            degraded: _bool(tutorResponse['degraded']),
             toolSuggestion:
                 tutorResponse['tool_suggestion'] is Map<String, dynamic>
                 ? WorkspaceToolSuggestion.fromMap(
@@ -559,6 +659,11 @@ int _clampedProgress(Object? value) {
 }
 
 int? _intOrNull(Object? value) => int.tryParse((value ?? '').toString());
+
+DateTime? _dateTimeOrNull(Object? value) {
+  final text = _string(value);
+  return text.isEmpty ? null : DateTime.tryParse(text)?.toLocal();
+}
 
 double? _doubleOrNull(Object? value) {
   if (value is num) {

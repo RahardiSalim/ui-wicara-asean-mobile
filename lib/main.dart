@@ -29,6 +29,7 @@ import 'src/features/pretest/data/api_pretest_repository.dart';
 import 'src/features/pretest/data/pretest_session_store.dart';
 import 'src/features/pretest/domain/pretest_repository.dart';
 import 'src/features/review/data/api_review_repository.dart';
+import 'src/features/teacher_students/data/api_teacher_student_repository.dart';
 import 'src/features/workspace/data/api_workspace_repository.dart';
 import 'src/features/workspace/data/workspace_session_store.dart';
 
@@ -73,6 +74,9 @@ Future<void> main() async {
     ),
     sessionStore: sessionStore,
     apiClient: apiClient,
+    // Workspace ids are account-scoped; keeping them across a sign-out makes the
+    // next account POST ids it does not own and 404 out of every module.
+    onSignedOut: [workspaceStore.clearAll],
   );
 
   await authController.initialize();
@@ -133,6 +137,9 @@ Future<void> main() async {
         ),
         reviewRepository: ApiReviewRepository(apiClient: apiClient),
         analyticsRepository: ApiAnalyticsRepository(apiClient: apiClient),
+        teacherStudentRepository: ApiTeacherStudentRepository(
+          apiClient: apiClient,
+        ),
         onboardingRepository: ApiOnboardingRepository(
           apiClient: apiClient,
           sessionStore: sessionStore,

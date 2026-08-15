@@ -4,6 +4,7 @@ import 'package:google_sign_in/google_sign_in.dart';
 import '../../../core/network/api_client.dart';
 import '../domain/auth_repository.dart';
 import 'auth_session_store.dart';
+import '../../../core/localization/app_language.dart';
 
 class ApiAuthRepository implements AuthRepository {
   ApiAuthRepository({
@@ -45,7 +46,6 @@ class ApiAuthRepository implements AuthRepository {
         body: {
           'email_or_phone': request.emailOrPhone.trim(),
           'password': request.password,
-          'role': request.role.name,
         },
       );
       final session = _toAuthSession(json, request.role);
@@ -59,7 +59,7 @@ class ApiAuthRepository implements AuthRepository {
     } on ApiClientException catch (error) {
       throw AuthException(error.message);
     } catch (error) {
-      throw AuthException('Sign-in failed: $error');
+      throw AuthException(AppLanguage.copy.signInFailedLabel(error));
     }
   }
 
@@ -86,7 +86,19 @@ class ApiAuthRepository implements AuthRepository {
     } on ApiClientException catch (error) {
       throw AuthException(error.message);
     } catch (error) {
-      throw AuthException('Registration failed: $error');
+      throw AuthException(AppLanguage.copy.registrationFailedLabel(error));
+    }
+  }
+
+  @override
+  Future<void> requestPasswordReset(String email) async {
+    try {
+      await _apiClient.postJson(
+        '/api/v1/auth/password-reset',
+        body: {'email': email.trim()},
+      );
+    } on ApiClientException catch (error) {
+      throw AuthException(error.message);
     }
   }
 
@@ -101,7 +113,7 @@ class ApiAuthRepository implements AuthRepository {
       }
       final account = await googleSignIn.signIn();
       if (account == null) {
-        throw const AuthException('Google sign-in was cancelled.');
+        throw AuthException(AppLanguage.copy.googleSignInCancelledLabel);
       }
       return await _exchangeGoogleAccount(account, role);
     } on AuthException {
@@ -109,7 +121,7 @@ class ApiAuthRepository implements AuthRepository {
     } on ApiClientException catch (error) {
       throw AuthException(error.message);
     } catch (error) {
-      throw AuthException('Google sign-in failed: $error');
+      throw AuthException(AppLanguage.copy.googleSignInFailedLabel(error));
     }
   }
 
@@ -144,7 +156,7 @@ class ApiAuthRepository implements AuthRepository {
     } on ApiClientException catch (error) {
       throw AuthException(error.message);
     } catch (error) {
-      throw AuthException('Google sign-in failed: $error');
+      throw AuthException(AppLanguage.copy.googleSignInFailedLabel(error));
     }
   }
 
@@ -164,7 +176,7 @@ class ApiAuthRepository implements AuthRepository {
         throw const AuthException('Google did not return accessToken.');
       }
 
-      final body = <String, String>{'id_token': idToken, 'role': role.name};
+      final body = <String, String>{'id_token': idToken};
       if (accessToken != null && accessToken.isNotEmpty) {
         body['access_token'] = accessToken;
       }
@@ -186,7 +198,7 @@ class ApiAuthRepository implements AuthRepository {
     } on ApiClientException catch (error) {
       throw AuthException(error.message);
     } catch (error) {
-      throw AuthException('Google sign-in failed: $error');
+      throw AuthException(AppLanguage.copy.googleSignInFailedLabel(error));
     }
   }
 
@@ -220,11 +232,16 @@ class ApiAuthRepository implements AuthRepository {
   AuthSession _toAuthSession(Map<String, dynamic> json, AuthRole role) {
     final token = (json['token'] ?? '').toString().trim();
     final refresh = (json['refresh_token'] ?? '').toString().trim();
+    final backendRole = (json['role'] ?? '').toString().trim();
+    final resolvedRole = AuthRole.values.firstWhere(
+      (candidate) => candidate.name == backendRole,
+      orElse: () => AuthRole.learner,
+    );
 
     return AuthSession(
       userId: (json['user_id'] ?? '').toString(),
       displayName: (json['display_name'] ?? '').toString(),
-      role: role,
+      role: resolvedRole,
       onboardingCompleted: json['onboarding_completed'] == true,
       token: token.isEmpty ? null : token,
       refreshToken: refresh.isEmpty ? null : refresh,

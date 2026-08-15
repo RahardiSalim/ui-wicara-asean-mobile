@@ -10,13 +10,19 @@ class AuthController extends ChangeNotifier {
     required AuthRepository authRepository,
     required AuthSessionStore sessionStore,
     required ApiClient apiClient,
+    List<Future<void> Function()> onSignedOut = const [],
   }) : _authRepository = authRepository,
        _sessionStore = sessionStore,
-       _apiClient = apiClient;
+       _apiClient = apiClient,
+       _onSignedOut = onSignedOut;
 
   final AuthRepository _authRepository;
   final AuthSessionStore _sessionStore;
   final ApiClient _apiClient;
+
+  /// Per-feature cleanup run on sign-out. Anything caching account-scoped ids
+  /// must register here, otherwise the next account inherits them.
+  final List<Future<void> Function()> _onSignedOut;
 
   bool _isInitialized = false;
   AuthSession? _session;
@@ -29,6 +35,9 @@ class AuthController extends ChangeNotifier {
     final session = _session;
     if (session == null) {
       return AppRoutes.landing;
+    }
+    if (session.role == AuthRole.teacher) {
+      return AppRoutes.home;
     }
     if (!session.onboardingCompleted) {
       return AppRoutes.onboarding;
@@ -135,6 +144,10 @@ class AuthController extends ChangeNotifier {
     return session;
   }
 
+  Future<void> requestPasswordReset(String email) {
+    return _authRepository.requestPasswordReset(email);
+  }
+
   Future<AuthSession> startDevelopmentSession({
     required AuthRole role,
     String? displayName,
@@ -181,6 +194,13 @@ class AuthController extends ChangeNotifier {
       _lastProtectedRoute = null;
       _apiClient.clearAuthToken();
       await _sessionStore.clear();
+      for (final clear in _onSignedOut) {
+        try {
+          await clear();
+        } catch (_) {
+          // Best effort: one failing cleanup must not block sign-out.
+        }
+      }
       notifyListeners();
     }
   }

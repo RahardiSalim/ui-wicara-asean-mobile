@@ -161,6 +161,56 @@ void main() {
     expect(body['module_id'], 'module-1');
   });
 
+  test(
+    'ready workspace posttest is fetched by its existing session id',
+    () async {
+      SharedPreferences.setMockInitialValues({});
+      final sessionStore = AuthSessionStore();
+      await sessionStore.save(
+        session: const AuthSession(
+          userId: 'learner-test',
+          displayName: 'Learner Test',
+          role: AuthRole.learner,
+          onboardingCompleted: true,
+          token: 'token-test',
+        ),
+        lastProtectedRoute: '/home',
+      );
+
+      late http.Request capturedRequest;
+      final apiClient = ApiClient(
+        baseUrl: 'http://127.0.0.1:8000',
+        httpClient: MockClient((request) async {
+          capturedRequest = request;
+          return http.Response(
+            jsonEncode({
+              'session_id': 'posttest-ready-1',
+              'status': 'active',
+              'question_count': 0,
+              'total_questions': 0,
+              'questions': [],
+              'node_results': [],
+            }),
+            200,
+            headers: {'content-type': 'application/json'},
+          );
+        }),
+      );
+      final repository = ApiHomeRepository(
+        apiClient: apiClient,
+        sessionStore: sessionStore,
+      );
+
+      final session = await repository.fetchPosttest(
+        sessionId: 'posttest-ready-1',
+      );
+
+      expect(capturedRequest.method, 'GET');
+      expect(capturedRequest.url.path, '/api/v1/posttests/posttest-ready-1');
+      expect(session.sessionId, 'posttest-ready-1');
+    },
+  );
+
   test('posttest finalize parses node-level metrics', () async {
     SharedPreferences.setMockInitialValues({});
     final sessionStore = AuthSessionStore();

@@ -17,6 +17,7 @@ import '../domain/pretest_repository.dart';
 import 'widgets/assessment_option_tile.dart';
 import 'widgets/knowledge_state_card.dart';
 import 'widgets/rich_math_text.dart';
+import '../../../core/localization/wicara_copy_scope.dart';
 
 enum _PretestStage { question, result }
 
@@ -45,6 +46,10 @@ class PretestPage extends StatefulWidget {
 }
 
 class _PretestPageState extends State<PretestPage> {
+  OnboardingCopy get _copy => OnboardingCopy.forLanguage(
+    widget.onboardingController.profile.preferredLanguage,
+  );
+
   final _reasoningController = TextEditingController(text: '');
 
   _PretestStage _stage = _PretestStage.question;
@@ -111,7 +116,7 @@ class _PretestPageState extends State<PretestPage> {
       return;
     }
     if (_selectedOptionId.isEmpty) {
-      _showMessage('Pilih jawaban sebelum lanjut.');
+      _showMessage(_copy.chooseAnswerFirstLabel);
       return;
     }
 
@@ -120,7 +125,7 @@ class _PretestPageState extends State<PretestPage> {
 
   void _openReasoning() {
     if (_selectedOptionId.isEmpty) {
-      _showMessage('Pilih jawaban sebelum tambah cara.');
+      _showMessage(_copy.chooseAnswerBeforeReasoningLabel);
       return;
     }
     setState(() => _showInlineEvidence = !_showInlineEvidence);
@@ -138,11 +143,11 @@ class _PretestPageState extends State<PretestPage> {
     final file = result.files.single;
     final bytes = file.bytes;
     if (bytes == null || bytes.isEmpty) {
-      _showMessage('File gambar tidak dapat dibaca.');
+      _showMessage(_copy.imageUnreadableLabel);
       return;
     }
     if (bytes.length > 10 * 1024 * 1024) {
-      _showMessage('Ukuran gambar maksimal 10 MB.');
+      _showMessage(_copy.imageTooLargeLabel);
       return;
     }
     setState(() {
@@ -340,17 +345,16 @@ class _PretestPageState extends State<PretestPage> {
     if (_isLoadingQuestion) {
       return _PretestStateView(
         constraints: constraints,
-        title: 'Loading pretest',
-        message: 'Preparing adaptive questions...',
+        title: copy.loadingPretestLabel,
+        message: copy.preparingAdaptiveQuestionsLabel,
       );
     }
     if (_questionError != null || _question == null) {
       return _PretestStateView(
         constraints: constraints,
-        title: 'Pretest unavailable',
-        message:
-            _questionError ?? 'Local pretest generator returned no question.',
-        actionLabel: 'Try again',
+        title: copy.pretestUnavailableLabel,
+        message: _questionError ?? copy.noLocalQuestionLabel,
+        actionLabel: copy.tryAgainLabel,
         onAction: _loadQuestion,
       );
     }
@@ -369,22 +373,16 @@ class _PretestPageState extends State<PretestPage> {
         selectedOptionId: _selectedOptionId,
         isSubmitting: _isSubmitting || _isUploadingEvidence,
         submissionMessage: _isUploadingEvidence
-            ? (copy.isIndonesian
-                  ? 'Mengupload foto pekerjaan...'
-                  : 'Uploading your work image...')
-            : (copy.isIndonesian
-                  ? 'Jawaban dikirim. Menilai langkah dan menyiapkan soal berikutnya...'
-                  : 'Answer sent. Evaluating your work and preparing the next question...'),
+            ? (copy.uploadingWorkImageLabel)
+            : (copy.answerSentEvaluatingWorkPreparingLabel),
         showEvidence: _showInlineEvidence,
         reasoningController: _reasoningController,
         evidenceImageBytes: _evidenceImageBytes,
         evidenceImageName: _evidenceImageName,
         onClose: _leavePretest,
         onSelected: (id) => setState(() => _selectedOptionId = id),
-        submitLabel: copy.isIndonesian ? 'Kirim jawaban' : 'Submit answer',
-        addEvidenceLabel: copy.isIndonesian
-            ? 'Tambah cara / coretan'
-            : 'Add reasoning / sketch',
+        submitLabel: copy.submitAnswerLabel,
+        addEvidenceLabel: copy.addReasoningSketchLabel,
         onSubmit: _submitAnswer,
         onAddEvidence: _openReasoning,
         onPickImage: _pickEvidenceImage,
@@ -513,7 +511,7 @@ class _QuestionStage extends StatelessWidget {
   Widget build(BuildContext context) {
     final compact = constraints.maxHeight < 700;
     final horizontalPadding = constraints.maxWidth < 360 ? 18.0 : 28.0;
-    final locale = copy.isIndonesian ? 'id-ID' : 'en-US';
+    final locale = copy.speechLocale;
     final speechText = [
       question.topic,
       question.prompt,
@@ -648,11 +646,12 @@ class _QuestionStage extends StatelessWidget {
                       const SizedBox(height: 10),
                   ],
                   const SizedBox(height: 19),
-                  GradientButton(
-                    label: submitLabel,
-                    onPressed: selectedOptionId.isEmpty ? null : onSubmit,
-                    isLoading: isSubmitting,
-                  ),
+                  if (!showEvidence)
+                    GradientButton(
+                      label: submitLabel,
+                      onPressed: selectedOptionId.isEmpty ? null : onSubmit,
+                      isLoading: isSubmitting,
+                    ),
                   if (isSubmitting) ...[
                     const SizedBox(height: 9),
                     Text(
@@ -673,9 +672,7 @@ class _QuestionStage extends StatelessWidget {
                     icon: const Icon(Icons.edit_note_rounded, size: 20),
                     label: Text(
                       showEvidence
-                          ? (copy.isIndonesian
-                                ? 'Tutup cara pengerjaan'
-                                : 'Hide work evidence')
+                          ? (copy.hideWorkEvidenceLabel)
                           : addEvidenceLabel,
                     ),
                     style: OutlinedButton.styleFrom(
@@ -748,7 +745,7 @@ class _InlineEvidencePanel extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            copy.isIndonesian ? 'Cara pengerjaan' : 'Work evidence',
+            copy.workEvidenceLabel,
             style: Theme.of(context).textTheme.titleSmall?.copyWith(
               color: WicaraColors.text,
               fontWeight: FontWeight.w800,
@@ -756,9 +753,7 @@ class _InlineEvidencePanel extends StatelessWidget {
           ),
           const SizedBox(height: 5),
           Text(
-            copy.isIndonesian
-                ? 'Tulis langkahmu, upload foto pekerjaan, atau gunakan keduanya. Foto akan dibaca AI sebagai langkah pengerjaan.'
-                : 'Type your steps, upload a photo of your work, or use both. AI will read the image as solution steps.',
+            copy.typeStepsUploadPhotoWorkLabel,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: WicaraColors.muted,
               fontWeight: FontWeight.w600,
@@ -772,9 +767,7 @@ class _InlineEvidencePanel extends StatelessWidget {
             minLines: 3,
             maxLines: 6,
             decoration: InputDecoration(
-              hintText: copy.isIndonesian
-                  ? 'Tulis langkah pengerjaanmu...'
-                  : 'Write your solution steps...',
+              hintText: copy.writeSolutionStepsLabel,
               filled: true,
               fillColor: Colors.white,
               border: OutlineInputBorder(
@@ -793,9 +786,7 @@ class _InlineEvidencePanel extends StatelessWidget {
               onPressed: isSubmitting ? null : onPickImage,
               icon: const Icon(Icons.add_photo_alternate_outlined),
               label: Text(
-                copy.isIndonesian
-                    ? 'Upload foto pekerjaan'
-                    : 'Upload work image',
+                copy.uploadWorkImageLabel,
               ),
             )
           else
@@ -836,9 +827,7 @@ class _InlineEvidencePanel extends StatelessWidget {
                         ),
                       ),
                       IconButton(
-                        tooltip: copy.isIndonesian
-                            ? 'Hapus foto'
-                            : 'Remove image',
+                        tooltip: copy.removeImageLabel,
                         onPressed: isSubmitting ? null : onRemoveImage,
                         icon: const Icon(Icons.close_rounded, size: 20),
                       ),
@@ -849,9 +838,7 @@ class _InlineEvidencePanel extends StatelessWidget {
             ),
           const SizedBox(height: 13),
           GradientButton(
-            label: copy.isIndonesian
-                ? 'Kirim jawaban dengan bukti'
-                : 'Submit answer with evidence',
+            label: copy.submitAnswerEvidenceLabel,
             onPressed: isSubmitting ? null : onSubmit,
             isLoading: isSubmitting,
           ),
@@ -879,10 +866,9 @@ class _ResultStage extends StatelessWidget {
     final state =
         result ??
         KnowledgeState(
-          skill: 'Missing prerequisite: causal drivers',
+          skill: copy.missingPrerequisiteSkillLabel,
           gapLabel: 'GAP',
-          message:
-              'The gap looks like choosing a tool before naming the defect driver, evidence, and likely cause chain.',
+          message: copy.missingPrerequisiteMessageLabel,
           pathTitle: copy.personalizedPathGeneratedLabel,
           pathMeta: '12-15 min   •   3 skills',
           pathDescription: copy.personalizedPathDescription,
@@ -890,7 +876,7 @@ class _ResultStage extends StatelessWidget {
     final localizedPathMeta = copy.isIndonesian
         ? state.pathMeta.replaceAll('skills', 'skill')
         : state.pathMeta;
-    final locale = copy.isIndonesian ? 'id-ID' : 'en-US';
+    final locale = copy.speechLocale;
     final resultSpeechText = [
       copy.yourKnowledgeStateLabel,
       if (state.masteryScore != null)
@@ -1022,8 +1008,8 @@ class _ScoreSummaryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final scorePercent = ((score ?? 0).clamp(0.0, 1.0) * 100).round();
     final correctText = answeredCount > 0
-        ? '$correctCount/$answeredCount ${copy.isIndonesian ? 'benar' : 'correct'}'
-        : (copy.isIndonesian ? 'Belum ada jawaban' : 'No answers');
+        ? '$correctCount/$answeredCount ${copy.correctLabel3}'
+        : (copy.noAnswersLabel);
     return Container(
       padding: const EdgeInsets.fromLTRB(17, 15, 17, 15),
       decoration: BoxDecoration(
@@ -1072,11 +1058,11 @@ class _ScoreSummaryCard extends StatelessWidget {
                 const SizedBox(height: 4),
                 Text(
                   [
-                    copy.isIndonesian ? 'Skor MCQ resmi' : 'Official MCQ score',
+                    copy.officialMcqScoreLabel,
                     correctText,
                     if (overallMasteryPercent != null &&
                         overallMasteryPercent != scorePercent)
-                      '${copy.isIndonesian ? 'Laporan' : 'Report'} $overallMasteryPercent%',
+                      '${copy.reportLabel} $overallMasteryPercent%',
                   ].join(' • '),
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: WicaraColors.muted,
@@ -1197,9 +1183,7 @@ class _KnowledgeGapDiagnosisCard extends StatelessWidget {
           if (strengths.isNotEmpty) ...[
             const SizedBox(height: 18),
             _ReportInsightList(
-              title: copy.isIndonesian
-                  ? 'Yang sudah kuat'
-                  : 'What looks strong',
+              title: copy.whatLooksStrongLabel,
               icon: Icons.check_circle_outline_rounded,
               color: WicaraColors.secondary,
               items: strengths,
@@ -1208,9 +1192,7 @@ class _KnowledgeGapDiagnosisCard extends StatelessWidget {
           if (gaps.isNotEmpty) ...[
             const SizedBox(height: 14),
             _ReportInsightList(
-              title: copy.isIndonesian
-                  ? 'Yang perlu diperbaiki'
-                  : 'What needs work',
+              title: copy.whatNeedsWorkLabel,
               icon: Icons.warning_amber_rounded,
               color: WicaraColors.accentCoral,
               items: gaps,
@@ -1219,7 +1201,7 @@ class _KnowledgeGapDiagnosisCard extends StatelessWidget {
           if (evidenceNotes.isNotEmpty) ...[
             const SizedBox(height: 14),
             _ReportInsightList(
-              title: copy.isIndonesian ? 'Catatan evidence' : 'Evidence notes',
+              title: copy.evidenceNotesLabel,
               icon: Icons.fact_check_outlined,
               color: WicaraColors.primaryDeep,
               items: evidenceNotes,
@@ -1317,7 +1299,7 @@ class _NodeBreakdownCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            copy.isIndonesian ? 'Node yang dicek' : 'Checked nodes',
+            copy.checkedNodesLabel,
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
               color: WicaraColors.text,
               fontSize: 16,
@@ -1379,14 +1361,14 @@ class _NodeBreakdownRow extends StatelessWidget {
             runSpacing: 8,
             children: [
               _MetricPill(
-                label: copy.isIndonesian ? 'Benar' : 'Correct',
+                label: copy.correctLabel2,
                 value: node.answerPercent == null
                     ? '${node.correctCount}/${node.attemptCount}'
                     : _percentMetricText(node.answerPercent),
               ),
               if (node.difficultyReached.isNotEmpty)
                 _MetricPill(
-                  label: copy.isIndonesian ? 'Level' : 'Level',
+                  label: copy.levelLabel,
                   value: node.difficultyReached,
                 ),
             ],
@@ -1437,9 +1419,7 @@ class _RecommendedFocusCard extends StatelessWidget {
               const SizedBox(width: 9),
               Expanded(
                 child: Text(
-                  copy.isIndonesian
-                      ? 'Fokus path berikutnya'
-                      : 'Next path focus',
+                  copy.nextPathFocusLabel,
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     color: WicaraColors.text,
                     fontSize: 16,
@@ -1559,26 +1539,18 @@ String _reasoningText(PretestNodeReport node, OnboardingCopy copy) {
     return '';
   }
   if (node.misconceptionDetected) {
-    return copy.isIndonesian
-        ? 'Reasoning menunjukkan miskonsepsi pada node ini.'
-        : 'Reasoning suggests a misconception on this node.';
+    return copy.reasoningSuggestsMisconceptionNodeLabel;
   }
   if (node.carelessMistakePossible) {
-    return copy.isIndonesian
-        ? 'Ada indikasi salah pilih walau langkah cukup masuk akal.'
-        : 'There is a possible careless choice despite reasonable reasoning.';
+    return copy.therePossibleCarelessChoiceDespiteLabel;
   }
   if (node.reasoningQuality == 'not_provided') {
-    return copy.isIndonesian
-        ? 'Evidence tersimpan, tetapi tidak ada langkah tertulis untuk dianalisis.'
-        : 'Evidence was stored, but no written steps were available to analyze.';
+    return copy.evidenceWasStoredButNoLabel;
   }
   final score = node.avgReasoningScore == null
       ? ''
       : ' ${(node.avgReasoningScore!.clamp(0.0, 1.0) * 100).round()}%';
-  return copy.isIndonesian
-      ? 'Kualitas reasoning: ${node.reasoningQuality}$score.'
-      : 'Reasoning quality: ${node.reasoningQuality}$score.';
+  return copy.reasoningQualityLabel(node.reasoningQuality, score);
 }
 
 class _AssessmentHeader extends StatelessWidget {
@@ -1644,7 +1616,7 @@ class _AssessmentFooter extends StatelessWidget {
         const SizedBox(width: 8),
         Flexible(
           child: Text(
-            'Adaptive probing  •  Knowledge Space Theory',
+            WicaraCopyScope.of(context).adaptiveProbingLabel,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(

@@ -1,3 +1,5 @@
+import '../../../core/localization/app_language.dart';
+
 class LocalPretestOption {
   const LocalPretestOption({
     required this.id,
@@ -48,7 +50,10 @@ class LocalPretestQuestion {
     'concept_title': conceptTitle,
     'topic': conceptTitle,
     'difficulty': difficulty,
-    'step_label': 'Question $progressCurrent of $progressMax',
+    'step_label': AppLanguage.copy.questionProgressLabel(
+      progressCurrent,
+      progressMax,
+    ),
     'prompt': prompt,
     'helper': helper,
     'options': options.map((option) => option.toJson()).toList(growable: false),

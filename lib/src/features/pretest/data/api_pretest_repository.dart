@@ -2,11 +2,17 @@ import 'dart:typed_data';
 
 import '../../../core/network/api_client.dart';
 import '../../auth/data/auth_session_store.dart';
+import '../../../core/localization/app_language.dart';
+import '../../onboarding/domain/onboarding_copy.dart';
 import '../domain/pretest_models.dart';
 import '../domain/pretest_repository.dart';
 import 'pretest_session_store.dart';
 
 const _pretestRequestTimeout = Duration(minutes: 5);
+
+/// Copy for the learner's language. The pretest data layer runs outside the
+/// widget tree, so it reads the app-wide language mirror.
+OnboardingCopy get _copy => AppLanguage.copy;
 
 class ApiPretestRepository implements PretestRepository {
   const ApiPretestRepository({
@@ -26,9 +32,7 @@ class ApiPretestRepository implements PretestRepository {
     final token = _requireToken();
     final learningGoalId = _pretestSessionStore.learningGoalId;
     if (learningGoalId == null || learningGoalId.isEmpty) {
-      throw const PretestException(
-        'Create a learning goal before opening the pretest.',
-      );
+      throw PretestException(_copy.createGoalBeforePretestLabel);
     }
 
     try {
@@ -41,9 +45,7 @@ class ApiPretestRepository implements PretestRepository {
       _pretestSessionStore.pretestSessionId = _string(json['session_id']);
       final current = json['current_question'];
       if (current is! Map<String, dynamic>) {
-        throw const PretestException(
-          'Backend returned an invalid pretest question.',
-        );
+        throw PretestException(_copy.invalidPretestQuestionLabel);
       }
       return questionFromJson(current);
     } on PretestException {
@@ -58,7 +60,7 @@ class ApiPretestRepository implements PretestRepository {
     final token = _requireToken();
     final sessionId = _requirePretestSessionId();
     if (answer.optionId.isEmpty) {
-      throw const PretestException('Choose an answer before continuing.');
+      throw PretestException(_copy.chooseAnswerFirstLabel);
     }
 
     try {
@@ -89,9 +91,7 @@ class ApiPretestRepository implements PretestRepository {
           diagnosis: knowledgeStateFromDiagnosis(diagnosis),
         );
       }
-      throw const PretestException(
-        'Backend returned no next question or diagnosis.',
-      );
+      throw PretestException(_copy.noNextQuestionLabel);
     } on ApiClientException catch (error) {
       if (_isQuestionAlreadyAnswered(error)) {
         final currentQuestion = await fetchCurrentQuestion();
@@ -122,9 +122,7 @@ class ApiPretestRepository implements PretestRepository {
       );
       final assetId = _string(json['id']);
       if (assetId.isEmpty) {
-        throw const PretestException(
-          'Backend returned an invalid evidence image.',
-        );
+        throw PretestException(_copy.invalidEvidenceImageLabel);
       }
       return assetId;
     } on ApiClientException catch (error) {
@@ -137,9 +135,7 @@ class ApiPretestRepository implements PretestRepository {
     final token = _requireToken();
     final learningGoalId = _pretestSessionStore.learningGoalId;
     if (learningGoalId == null || learningGoalId.isEmpty) {
-      throw const PretestException(
-        'Create a learning goal before selecting a path.',
-      );
+      throw PretestException(_copy.createGoalBeforePathLabel);
     }
 
     try {
@@ -149,13 +145,16 @@ class ApiPretestRepository implements PretestRepository {
         body: {'path_option': pathOption},
       );
       _pretestSessionStore.trackId = _string(json['track_id']);
+      final copy = _copy;
       return KnowledgeState(
-        skill: 'Path selected',
+        skill: copy.pathSelectedLabel,
         gapLabel: _string(json['goal_status']).toUpperCase(),
-        message: 'Your adaptive learning path is ready.',
-        pathTitle: 'Personalized path generated',
-        pathMeta: '${(json['modules'] as List?)?.length ?? 0} modules',
-        pathDescription: 'Continue with the selected path.',
+        message: copy.adaptivePathReadyLabel,
+        pathTitle: copy.personalizedPathGeneratedLabel,
+        pathMeta: copy.modulesCountLabel(
+          (json['modules'] as List?)?.length ?? 0,
+        ),
+        pathDescription: copy.continueSelectedPathLabel,
         recommendedPath: pathOption,
         pathOptions: const [],
       );
@@ -167,7 +166,7 @@ class ApiPretestRepository implements PretestRepository {
   String _requireToken() {
     final token = _sessionStore.accessToken;
     if (token == null || token.isEmpty) {
-      throw const PretestException('Please log in before taking the pretest.');
+      throw PretestException(_copy.loginBeforePretestLabel);
     }
     return token;
   }
@@ -175,9 +174,7 @@ class ApiPretestRepository implements PretestRepository {
   String _requirePretestSessionId() {
     final sessionId = _pretestSessionStore.pretestSessionId;
     if (sessionId == null || sessionId.isEmpty) {
-      throw const PretestException(
-        'Open a generated pretest before submitting.',
-      );
+      throw PretestException(_copy.openPretestBeforeSubmitLabel);
     }
     return sessionId;
   }
@@ -220,6 +217,7 @@ PretestQuestion questionFromJson(Map<String, dynamic> json) {
 }
 
 KnowledgeState knowledgeStateFromDiagnosis(Map<String, dynamic> diagnosis) {
+  final copy = _copy;
   final target = diagnosis['target'];
   final analysis = diagnosis['analysis'];
   final targetTitle = target is Map ? _string(target['title']) : '';
@@ -252,16 +250,17 @@ KnowledgeState knowledgeStateFromDiagnosis(Map<String, dynamic> diagnosis) {
       _int(diagnosis['overall_mastery_percent']) ??
       (analysis is Map ? _int(analysis['overall_mastery_percent']) : null);
   return KnowledgeState(
-    skill: targetTitle.isNotEmpty ? targetTitle : 'Adaptive diagnosis',
+    skill: targetTitle.isNotEmpty ? targetTitle : copy.adaptiveDiagnosisLabel,
     gapLabel: target is Map ? _string(target['status']).toUpperCase() : 'DONE',
     message: _string(diagnosis['summary']),
-    pathTitle: 'Personalized path generated',
+    pathTitle: copy.personalizedPathGeneratedLabel,
     pathMeta: _scoreMeta(
+      copy,
       scorePercent: scorePercent,
       correctCount: correctCount,
       answeredCount: answeredCount,
     ),
-    pathDescription: _pathDescription(recommendedPath),
+    pathDescription: copy.pathDescriptionLabel(recommendedPath),
     recommendedPath: recommendedPath.isEmpty
         ? 'target_from_basics'
         : recommendedPath,
@@ -305,19 +304,6 @@ int _intFromProgress(Object? value, String key, {required int fallback}) {
     return (value[key] as num).toInt();
   }
   return fallback;
-}
-
-String _pathDescription(String option) {
-  return switch (option) {
-    'review_only' => 'Start with a short review and advanced practice.',
-    'target_reinforcement' =>
-      'Practice the target concept at medium and hard levels.',
-    'target_intro' => 'Start from the target concept introduction.',
-    'repair_prerequisites' =>
-      'Repair prerequisite gaps before returning to the target.',
-    'full_foundation_path' => 'Rebuild the deeper foundation first.',
-    _ => 'Learn the target concept from basics.',
-  };
 }
 
 int? _int(Object? value) {
@@ -376,17 +362,18 @@ List<PretestNodeReport> _nodeReports(Object? value) {
       .toList(growable: false);
 }
 
-String _scoreMeta({
+String _scoreMeta(
+  OnboardingCopy copy, {
   required double? scorePercent,
   required int correctCount,
   required int answeredCount,
 }) {
   if (scorePercent == null) {
-    return 'Adaptive pretest complete';
+    return copy.adaptivePretestCompleteLabel;
   }
-  final parts = <String>['Score ${scorePercent.round()}%'];
+  final parts = <String>[copy.scoreMetaLabel(scorePercent.round())];
   if (answeredCount > 0) {
-    parts.add('$correctCount/$answeredCount correct');
+    parts.add(copy.correctCountMetaLabel(correctCount, answeredCount));
   }
   return parts.join(' • ');
 }

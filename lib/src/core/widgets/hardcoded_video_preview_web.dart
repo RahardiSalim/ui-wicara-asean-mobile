@@ -3,6 +3,8 @@ import 'dart:ui_web' as ui_web;
 import 'package:flutter/material.dart';
 import 'package:web/web.dart' as web;
 
+import '../localization/wicara_copy_scope.dart';
+
 class HardcodedVideoPreview extends StatelessWidget {
   const HardcodedVideoPreview({
     required this.videoUrl,
@@ -66,9 +68,9 @@ class HardcodedVideoPreview extends StatelessWidget {
                     color: Colors.black.withValues(alpha: 0.45),
                     borderRadius: BorderRadius.circular(999),
                   ),
-                  child: const Text(
-                    'Tap to open',
-                    style: TextStyle(
+                  child: Text(
+                    WicaraCopyScope.of(context).tapToOpenLabel,
+                    style: const TextStyle(
                       color: Colors.white,
                       fontSize: 11,
                       fontWeight: FontWeight.w700,

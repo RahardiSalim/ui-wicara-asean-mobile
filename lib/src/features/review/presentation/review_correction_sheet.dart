@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../../../core/localization/wicara_copy_scope.dart';
 import '../../../core/theme/wicara_colors.dart';
+import '../../onboarding/domain/onboarding_copy.dart';
 import '../domain/review_models.dart';
 
 /// Bottom sheet that collects a teacher's correction for an artifact and returns
@@ -113,6 +115,7 @@ class _ReviewCorrectionSheetState extends State<ReviewCorrectionSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final copy = WicaraCopyScope.of(context);
     final bottomInset = MediaQuery.of(context).viewInsets.bottom;
     return Padding(
       padding: EdgeInsets.only(bottom: bottomInset),
@@ -143,7 +146,7 @@ class _ReviewCorrectionSheetState extends State<ReviewCorrectionSheet> {
                   const Icon(Icons.edit_note, color: WicaraColors.primaryDeep),
                   const SizedBox(width: 8),
                   Text(
-                    'Correct ${widget.detail.artifactType}',
+                    copy.correctArtifactTitle(widget.detail.artifactType),
                     style: const TextStyle(
                       color: WicaraColors.ink,
                       fontWeight: FontWeight.w800,
@@ -156,7 +159,7 @@ class _ReviewCorrectionSheetState extends State<ReviewCorrectionSheet> {
             Expanded(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                child: _form(),
+                child: _form(copy),
               ),
             ),
             SafeArea(
@@ -171,7 +174,7 @@ class _ReviewCorrectionSheetState extends State<ReviewCorrectionSheet> {
                     ),
                     onPressed: _submit,
                     icon: const Icon(Icons.save_outlined),
-                    label: const Text('Save correction'),
+                    label: Text(copy.saveCorrectionLabel),
                   ),
                 ),
               ),
@@ -182,23 +185,22 @@ class _ReviewCorrectionSheetState extends State<ReviewCorrectionSheet> {
     );
   }
 
-  Widget _form() {
+  Widget _form(OnboardingCopy copy) {
     return switch (widget.detail.artifactType) {
-      'question' => _questionForm(),
-      'diagnosis' => _diagnosisForm(),
-      'evaluation' => _evaluationForm(),
-      _ => const Text('This artifact type cannot be corrected.'),
+      'question' => _questionForm(copy),
+      'diagnosis' => _diagnosisForm(copy),
+      'evaluation' => _evaluationForm(copy),
+      _ => Text(copy.artifactNotCorrectableLabel),
     };
   }
 
-  Widget _questionForm() {
+  Widget _questionForm(OnboardingCopy copy) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        _field('Prompt', _promptController, maxLines: 3),
+        _field(copy.promptLabel, _promptController, maxLines: 3),
         const SizedBox(height: 12),
-        const Text('Options (tap the circle to mark the correct one)',
-            style: _labelStyle),
+        Text(copy.optionsTapCorrectLabel, style: _labelStyle),
         const SizedBox(height: 6),
         for (var i = 0; i < _optionControllers.length; i++)
           Padding(
@@ -219,42 +221,41 @@ class _ReviewCorrectionSheetState extends State<ReviewCorrectionSheet> {
                 Expanded(
                   child: TextField(
                     controller: _optionControllers[i],
-                    decoration: _decoration('Option ${i + 1}'),
+                    decoration: _decoration(copy.optionNumberLabel(i + 1)),
                   ),
                 ),
               ],
             ),
           ),
         const SizedBox(height: 4),
-        _field('Expected reasoning', _expectedController, maxLines: 3),
+        _field(copy.expectedReasoningLabel, _expectedController, maxLines: 3),
         const SizedBox(height: 12),
-        _notesField(),
+        _notesField(copy),
       ],
     );
   }
 
-  Widget _diagnosisForm() {
+  Widget _diagnosisForm(OnboardingCopy copy) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text(
-          'Override the diagnosed prerequisite concept id. Confirming sets the '
-          'diagnosis status to "confirmed".',
-          style: TextStyle(color: WicaraColors.muted, fontSize: 13),
+        Text(
+          copy.overrideConceptIdLabel,
+          style: const TextStyle(color: WicaraColors.muted, fontSize: 13),
         ),
         const SizedBox(height: 10),
-        _field('Suggested concept id', _conceptIdController),
+        _field(copy.suggestedConceptIdLabel, _conceptIdController),
         const SizedBox(height: 12),
-        _notesField(),
+        _notesField(copy),
       ],
     );
   }
 
-  Widget _evaluationForm() {
+  Widget _evaluationForm(OnboardingCopy copy) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const Text('Reasoning score', style: _labelStyle),
+        Text(copy.reasoningScoreLabel, style: _labelStyle),
         Row(
           children: [
             Expanded(
@@ -277,18 +278,23 @@ class _ReviewCorrectionSheetState extends State<ReviewCorrectionSheet> {
           ],
         ),
         const SizedBox(height: 4),
-        _field('Diagnostic signal', _signalController),
+        _field(copy.diagnosticSignalLabel, _signalController),
         const SizedBox(height: 12),
-        _field('Teacher feedback', _feedbackController, maxLines: 3),
+        _field(copy.teacherFeedbackLabel, _feedbackController, maxLines: 3),
         const SizedBox(height: 12),
-        _notesField(),
+        _notesField(copy),
       ],
     );
   }
 
-  Widget _notesField() => _field('Note (audit log)', _notesController, maxLines: 2);
+  Widget _notesField(OnboardingCopy copy) =>
+      _field(copy.auditNoteLabel, _notesController, maxLines: 2);
 
-  Widget _field(String label, TextEditingController controller, {int maxLines = 1}) {
+  Widget _field(
+    String label,
+    TextEditingController controller, {
+    int maxLines = 1,
+  }) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [

@@ -2,7 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../../core/localization/wicara_copy_scope.dart';
 import '../../../core/theme/wicara_colors.dart';
+import '../../onboarding/domain/onboarding_copy.dart';
 import '../data/litert_gemma_runtime.dart';
 import '../domain/edge_ai_models.dart';
 import '../domain/edge_ai_runtime.dart';
@@ -10,7 +12,7 @@ import '../domain/edge_ai_runtime.dart';
 class EdgeAiSettingsPage extends StatefulWidget {
   const EdgeAiSettingsPage({
     this.runtime = defaultEdgeAiRuntime,
-    this.testPrompt = _defaultTestPrompt,
+    this.testPrompt,
     this.initialModelUrl = _defaultModelUrl,
     super.key,
   });
@@ -21,11 +23,11 @@ class EdgeAiSettingsPage extends StatefulWidget {
         'https://huggingface.co/litert-community/gemma-4-E2B-it-litert-lm/resolve/main/gemma-4-E2B-it.litertlm',
   );
 
-  static const _defaultTestPrompt =
-      'Jawab dalam Bahasa Indonesia. Jelaskan konsep turunan sebagai laju perubahan dalam 2 kalimat, lalu berikan 1 pertanyaan cek pemahaman.';
-
   final EdgeAiRuntime runtime;
-  final String testPrompt;
+
+  /// Overrides the diagnostic prompt sent to the local model. When null the
+  /// prompt follows the learner's language so the output is readable.
+  final String? testPrompt;
   final String initialModelUrl;
 
   @override
@@ -87,7 +89,7 @@ class _EdgeAiSettingsPageState extends State<EdgeAiSettingsPage> {
         if (showLoading) {
           _isLoading = false;
         }
-        _errorText = 'Failed to read edge runtime status: $error';
+        _errorText = _copy.edgeAiStatusReadFailedLabel(error);
       });
     }
   }
@@ -115,11 +117,14 @@ class _EdgeAiSettingsPageState extends State<EdgeAiSettingsPage> {
     _installPollInFlight = false;
   }
 
+  OnboardingCopy get _copy => WicaraCopyScope.read(context);
+
   Future<void> _installModel({bool overwrite = false}) async {
+    final copy = _copy;
     final url = _modelUrlController.text.trim();
     if (url.isEmpty) {
       setState(() {
-        _errorText = 'Isi URL model terlebih dahulu.';
+        _errorText = copy.edgeAiEnterModelUrlLabel;
       });
       return;
     }
@@ -141,10 +146,16 @@ class _EdgeAiSettingsPageState extends State<EdgeAiSettingsPage> {
       setState(() {
         _isInstalling = false;
         _installSummary = installed.skipped && !overwrite
-            ? 'Model sudah ada di device (${installed.modelPath}).'
+            ? copy.edgeAiModelAlreadyPresentLabel(installed.modelPath)
             : overwrite
-            ? 'Model di-reinstall (${_formatBytes(installed.bytesDownloaded)} dalam ${installed.downloadMs ?? 0} ms).'
-            : 'Model terpasang (${_formatBytes(installed.bytesDownloaded)} dalam ${installed.downloadMs ?? 0} ms).';
+            ? copy.edgeAiModelReinstalledLabel(
+                _formatBytes(installed.bytesDownloaded),
+                installed.downloadMs ?? 0,
+              )
+            : copy.edgeAiModelInstalledLabel(
+                _formatBytes(installed.bytesDownloaded),
+                installed.downloadMs ?? 0,
+              );
       });
       _stopInstallProgressPolling();
       await _refreshStatus(showLoading: false);
@@ -154,7 +165,7 @@ class _EdgeAiSettingsPageState extends State<EdgeAiSettingsPage> {
       }
       setState(() {
         _isInstalling = false;
-        _errorText = 'Install model gagal: $error';
+        _errorText = copy.edgeAiInstallFailedLabel(error);
       });
       _stopInstallProgressPolling();
       await _refreshStatus(showLoading: false);
@@ -181,7 +192,7 @@ class _EdgeAiSettingsPageState extends State<EdgeAiSettingsPage> {
       }
       setState(() {
         _isInitializing = false;
-        _errorText = _friendlyInitializeError(error.toString());
+        _errorText = _friendlyInitializeError(_copy, error.toString());
       });
     }
   }
@@ -196,7 +207,7 @@ class _EdgeAiSettingsPageState extends State<EdgeAiSettingsPage> {
         return;
       }
       setState(() {
-        _installSummary = 'Model di-unload dari memori runtime.';
+        _installSummary = _copy.edgeAiUnloadedLabel;
       });
       await _refreshStatus(showLoading: false);
     } catch (error) {
@@ -204,16 +215,16 @@ class _EdgeAiSettingsPageState extends State<EdgeAiSettingsPage> {
         return;
       }
       setState(() {
-        _errorText = 'Unload model gagal: $error';
+        _errorText = _copy.edgeAiUnloadFailedLabel(error);
       });
     }
   }
 
-  String _friendlyInitializeError(String raw) {
+  String _friendlyInitializeError(OnboardingCopy copy, String raw) {
     if (raw.contains('INITIALIZE_FAILED')) {
-      return 'Initialize gagal. Biasanya karena file model korup/tidak cocok dengan runtime di device ini. Coba reinstall lalu initialize ulang.';
+      return copy.edgeAiInitializeCorruptLabel;
     }
-    return 'Initialize failed: $raw';
+    return copy.edgeAiInitializeFailedLabel(raw);
   }
 
   Future<void> _runTestPrompt() async {
@@ -226,7 +237,7 @@ class _EdgeAiSettingsPageState extends State<EdgeAiSettingsPage> {
     try {
       final request = EdgeGenerationRequest(
         requestId: 'litert_test_${DateTime.now().millisecondsSinceEpoch}',
-        prompt: widget.testPrompt,
+        prompt: widget.testPrompt ?? _copy.edgeAiTestPrompt,
         temperature: 0.3,
         maxTokens: 180,
       );
@@ -246,15 +257,16 @@ class _EdgeAiSettingsPageState extends State<EdgeAiSettingsPage> {
       }
       setState(() {
         _isGenerating = false;
-        _errorText = 'Local generation failed: $error';
+        _errorText = _copy.edgeAiGenerationFailedLabel(error);
       });
     }
   }
 
   @override
   Widget build(BuildContext context) {
+    final copy = WicaraCopyScope.of(context);
     final status = _status;
-    final statusLabel = _isLoading
+    final statusKey = _isLoading
         ? 'checking'
         : status == null
         ? 'unknown'
@@ -263,7 +275,15 @@ class _EdgeAiSettingsPageState extends State<EdgeAiSettingsPage> {
         : status.available
         ? (status.defaultModelExists ? 'needs-init' : 'needs-install')
         : 'unavailable';
-    final badgeColor = switch (statusLabel) {
+    final statusLabel = switch (statusKey) {
+      'checking' => copy.edgeAiStatusChecking,
+      'ready' => copy.edgeAiStatusReady,
+      'needs-init' => copy.edgeAiStatusNeedsInit,
+      'needs-install' => copy.edgeAiStatusNeedsInstall,
+      'unavailable' => copy.edgeAiStatusUnavailable,
+      _ => copy.edgeAiStatusUnknown,
+    };
+    final badgeColor = switch (statusKey) {
       'ready' => WicaraColors.accentMint,
       'needs-install' || 'needs-init' => const Color(0xFFF4A44E),
       'unavailable' => WicaraColors.accentCoral,
@@ -297,7 +317,7 @@ class _EdgeAiSettingsPageState extends State<EdgeAiSettingsPage> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      'Pengaturan AI Lokal',
+                      copy.edgeAiSettingsTitle,
                       style: Theme.of(context).textTheme.titleLarge?.copyWith(
                         color: WicaraColors.text,
                         fontWeight: FontWeight.w800,
@@ -308,7 +328,7 @@ class _EdgeAiSettingsPageState extends State<EdgeAiSettingsPage> {
               ),
               const SizedBox(height: 10),
               Text(
-                'Install, initialize, dan test model LiteRT-LM dari satu tempat.',
+                copy.edgeAiSettingsSubtitle,
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                   color: WicaraColors.muted,
                   fontWeight: FontWeight.w600,
@@ -335,7 +355,7 @@ class _EdgeAiSettingsPageState extends State<EdgeAiSettingsPage> {
                         const SizedBox(width: 8),
                         Expanded(
                           child: Text(
-                            'Edge AI (LiteRT-LM)',
+                            copy.edgeAiSectionLabel,
                             style: Theme.of(context).textTheme.bodyMedium
                                 ?.copyWith(
                                   color: WicaraColors.ink,
@@ -396,8 +416,8 @@ class _EdgeAiSettingsPageState extends State<EdgeAiSettingsPage> {
                       ),
                       label: Text(
                         _showAdvancedModelUrl
-                            ? 'Sembunyikan URL model'
-                            : 'Ubah URL model (advanced)',
+                            ? copy.edgeAiHideModelUrlLabel
+                            : copy.edgeAiShowModelUrlLabel,
                       ),
                     ),
                     if (_showAdvancedModelUrl) ...[
@@ -407,7 +427,7 @@ class _EdgeAiSettingsPageState extends State<EdgeAiSettingsPage> {
                         minLines: 1,
                         maxLines: 3,
                         decoration: InputDecoration(
-                          labelText: 'Model URL (.litertlm)',
+                          labelText: copy.edgeAiModelUrlLabel,
                           hintText: 'https://...',
                           filled: true,
                           fillColor: WicaraColors.fieldFill,
@@ -450,33 +470,39 @@ class _EdgeAiSettingsPageState extends State<EdgeAiSettingsPage> {
                               ? null
                               : () => _installModel(overwrite: false),
                           child: Text(
-                            _isInstalling ? 'Installing...' : 'Install model',
+                            _isInstalling
+                                ? copy.edgeAiInstallingLabel
+                                : copy.edgeAiInstallModelLabel,
                           ),
                         ),
                         OutlinedButton(
                           onPressed: _isInstalling
                               ? null
                               : () => _installModel(overwrite: true),
-                          child: const Text('Reinstall'),
+                          child: Text(copy.edgeAiReinstallLabel),
                         ),
                         FilledButton(
                           onPressed: _isInitializing ? null : _initialize,
                           child: Text(
-                            _isInitializing ? 'Initializing...' : 'Initialize',
+                            _isInitializing
+                                ? copy.edgeAiInitializingLabel
+                                : copy.edgeAiInitializeLabel,
                           ),
                         ),
                         OutlinedButton(
                           onPressed: _isLoading ? null : _refreshStatus,
-                          child: const Text('Refresh'),
+                          child: Text(copy.refreshLabel),
                         ),
                         OutlinedButton(
                           onPressed: _unloadModel,
-                          child: const Text('Unload'),
+                          child: Text(copy.edgeAiUnloadLabel),
                         ),
                         FilledButton.tonal(
                           onPressed: _isGenerating ? null : _runTestPrompt,
                           child: Text(
-                            _isGenerating ? 'Running...' : 'Run test prompt',
+                            _isGenerating
+                                ? copy.edgeAiRunningLabel
+                                : copy.edgeAiRunTestPromptLabel,
                           ),
                         ),
                       ],
@@ -494,7 +520,7 @@ class _EdgeAiSettingsPageState extends State<EdgeAiSettingsPage> {
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             Text(
-                              'Download model: ${download.status}',
+                              copy.edgeAiDownloadLabel(download.status),
                               style: Theme.of(context).textTheme.bodySmall
                                   ?.copyWith(
                                     color: WicaraColors.text,
@@ -507,7 +533,9 @@ class _EdgeAiSettingsPageState extends State<EdgeAiSettingsPage> {
                             Text(
                               download.hasKnownTotal
                                   ? '${_formatBytes(download.receivedBytes)} / ${_formatBytes(download.totalBytes ?? 0)}${progressValue == null ? '' : ' (${(progressValue * 100).toStringAsFixed(1)}%)'}'
-                                  : '${_formatBytes(download.receivedBytes)} downloaded',
+                                  : copy.edgeAiDownloadedLabel(
+                                      _formatBytes(download.receivedBytes),
+                                    ),
                               style: Theme.of(context).textTheme.bodySmall
                                   ?.copyWith(
                                     color: WicaraColors.muted,

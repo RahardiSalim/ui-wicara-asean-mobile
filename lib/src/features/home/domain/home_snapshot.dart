@@ -1,5 +1,6 @@
 import '../../pretest/domain/pretest_models.dart';
 import '../../workspace/domain/workspace_models.dart';
+import '../../../core/localization/app_language.dart';
 
 class HomeSnapshot {
   const HomeSnapshot({
@@ -56,7 +57,7 @@ class HomeSnapshot {
 
   String get subjectSummary {
     if (selectedSubjects.isEmpty) {
-      return 'No subjects selected';
+      return AppLanguage.copy.noSubjectsSelectedLabel;
     }
     return selectedSubjects.join(', ');
   }
@@ -224,11 +225,13 @@ class DailyEvaluationSession {
 }
 
 class ReviewDueSummary {
+  /// [title] and [actionLabel] default to empty so the UI can substitute
+  /// localized copy; backend-provided values win.
   const ReviewDueSummary({
-    this.title = 'Review due',
+    this.title = '',
     this.dueCount = 0,
     this.summary = '',
-    this.actionLabel = 'Start',
+    this.actionLabel = '',
   });
 
   final String title;
@@ -267,8 +270,9 @@ class RetentionForecastPoint {
 }
 
 class RetentionForecast {
+  /// [title] defaults to empty so the UI can substitute localized copy.
   const RetentionForecast({
-    this.title = 'Your retention forecast',
+    this.title = '',
     this.basis = '',
     this.points = const [],
   });
@@ -279,11 +283,13 @@ class RetentionForecast {
 }
 
 class RecommendationCallout {
+  /// [title] and [actionLabel] default to empty so the UI can substitute
+  /// localized copy.
   const RecommendationCallout({
-    this.title = 'Review now',
+    this.title = '',
     this.message = '',
     this.impactLabel = '',
-    this.actionLabel = 'Review now',
+    this.actionLabel = '',
   });
 
   final String title;

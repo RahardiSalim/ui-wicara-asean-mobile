@@ -14,6 +14,7 @@ import '../../../core/widgets/gradient_button.dart';
 import '../../../core/widgets/language_chip.dart';
 import '../../../core/widgets/speech_controls.dart';
 import '../../auth/application/auth_controller.dart';
+import '../../auth/domain/auth_repository.dart';
 import '../../curriculum/domain/curriculum_models.dart';
 import '../../curriculum/domain/curriculum_repository.dart';
 import '../../learning_goal/domain/learning_goal_repository.dart';
@@ -34,7 +35,11 @@ import '../../analytics/presentation/insights_page.dart';
 import '../../review/domain/review_models.dart';
 import '../../review/presentation/flag_review_button.dart';
 import '../../review/presentation/review_queue_page.dart';
+import '../../teacher_students/domain/teacher_student_models.dart';
+import '../../teacher_students/presentation/student_teacher_connections_page.dart';
+import '../../teacher_students/presentation/teacher_dashboard_page.dart';
 import '../../workspace/domain/workspace_models.dart';
+import '../../../core/localization/wicara_copy_scope.dart';
 
 enum _HomeTab { home, queue, progress, profile }
 
@@ -92,6 +97,7 @@ class AppHomePage extends StatefulWidget {
     required this.onboardingController,
     this.reviewRepository,
     this.analyticsRepository,
+    this.teacherStudentRepository,
     this.routeArguments,
     super.key,
   });
@@ -103,6 +109,7 @@ class AppHomePage extends StatefulWidget {
   final OnboardingController onboardingController;
   final ReviewRepository? reviewRepository;
   final AnalyticsRepository? analyticsRepository;
+  final TeacherStudentRepository? teacherStudentRepository;
   final Object? routeArguments;
 
   @override
@@ -110,6 +117,12 @@ class AppHomePage extends StatefulWidget {
 }
 
 class _AppHomePageState extends State<AppHomePage> {
+  /// Copy for the learner's language. Read from the profile rather than the
+  /// inherited scope so it stays correct inside async callbacks.
+  OnboardingCopy get _copy => OnboardingCopy.forLanguage(
+    widget.onboardingController.profile.preferredLanguage,
+  );
+
   _HomeTab _selectedTab = _HomeTab.home;
   _QueueTab _queueTab = _QueueTab.recommended;
   bool _showGalleryDetail = false;
@@ -185,14 +198,78 @@ class _AppHomePageState extends State<AppHomePage> {
     );
   }
 
+  void _openTeacherDashboard() {
+    final repo = widget.teacherStudentRepository;
+    if (repo == null) {
+      return;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => TeacherDashboardPage(
+          repository: repo,
+          reviewRepository: widget.reviewRepository,
+        ),
+      ),
+    );
+  }
+
+  void _openTeacherConnections() {
+    final repo = widget.teacherStudentRepository;
+    if (repo == null) {
+      return;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => StudentTeacherConnectionsPage(repository: repo),
+      ),
+    );
+  }
+
+  Future<void> _signOutTeacher() async {
+    await widget.authController.signOut();
+    if (!mounted) {
+      return;
+    }
+    Navigator.of(
+      context,
+    ).pushNamedAndRemoveUntil(AppRoutes.landing, (route) => false);
+  }
+
   Widget? _homeFab() {
-    if (_isTeacher && widget.reviewRepository != null) {
+    if (_isTeacher && widget.teacherStudentRepository != null) {
       return FloatingActionButton.extended(
         backgroundColor: WicaraColors.primaryDeep,
         foregroundColor: Colors.white,
-        icon: const Icon(Icons.rate_review_outlined),
-        label: const Text('Teacher review'),
-        onPressed: _openTeacherReview,
+        icon: const Icon(Icons.groups_outlined),
+        label: const Text('Students'),
+        onPressed: _openTeacherDashboard,
+      );
+    }
+    if (widget.teacherStudentRepository != null) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          if (widget.analyticsRepository != null) ...[
+            FloatingActionButton.small(
+              heroTag: 'home-insights',
+              tooltip: _copy.insightsLabel,
+              backgroundColor: WicaraColors.secondaryDeep,
+              foregroundColor: Colors.white,
+              onPressed: _openInsights,
+              child: const Icon(Icons.insights_outlined),
+            ),
+            const SizedBox(height: 8),
+          ],
+          FloatingActionButton.extended(
+            heroTag: 'home-teacher-connections',
+            backgroundColor: WicaraColors.primaryDeep,
+            foregroundColor: Colors.white,
+            icon: const Icon(Icons.supervisor_account_outlined),
+            label: const Text('My teachers'),
+            onPressed: _openTeacherConnections,
+          ),
+        ],
       );
     }
     if (widget.analyticsRepository != null) {
@@ -200,7 +277,7 @@ class _AppHomePageState extends State<AppHomePage> {
         backgroundColor: WicaraColors.secondaryDeep,
         foregroundColor: Colors.white,
         icon: const Icon(Icons.insights_outlined),
-        label: const Text('Insights'),
+        label: Text(_copy.insightsLabel),
         onPressed: _openInsights,
       );
     }
@@ -218,11 +295,11 @@ class _AppHomePageState extends State<AppHomePage> {
       ..hideCurrentSnackBar()
       ..showSnackBar(
         SnackBar(
-          content: const Text('Answer scored by AI.'),
+          content: Text(_copy.answerScoredByAiLabel),
           behavior: SnackBarBehavior.floating,
           duration: const Duration(seconds: 5),
           action: SnackBarAction(
-            label: 'Scoring off?',
+            label: _copy.scoringOffLabel,
             onPressed: () {
               promptAndFlag(
                 context: context,
@@ -278,10 +355,8 @@ class _AppHomePageState extends State<AppHomePage> {
         ScaffoldMessenger.of(context)
           ..hideCurrentSnackBar()
           ..showSnackBar(
-            const SnackBar(
-              content: Text(
-                'Track sudah dibuat, tapi belum ada module workspace yang bisa dibuka.',
-              ),
+            SnackBar(
+              content: Text(_copy.trackWithoutModuleLabel),
               behavior: SnackBarBehavior.floating,
             ),
           );
@@ -299,8 +374,8 @@ class _AppHomePageState extends State<AppHomePage> {
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(
-          const SnackBar(
-            content: Text('Gagal auto-open workspace setelah pretest.'),
+          SnackBar(
+            content: Text(_copy.workspaceAutoOpenFailedLabel),
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -337,25 +412,24 @@ class _AppHomePageState extends State<AppHomePage> {
     if (!mounted) {
       return;
     }
+    final copy = _copy;
     await showDialog<void>(
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          title: const Text('Model AI lokal belum terpasang'),
-          content: const Text(
-            'Wicara akan lebih stabil kalau model LiteRT sudah di-download. Mau buka Pengaturan AI Lokal sekarang?',
-          ),
+          title: Text(copy.edgeAiModelMissingTitle),
+          content: Text(copy.edgeAiModelMissingMessage),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('Nanti'),
+              child: Text(copy.laterLabel),
             ),
             FilledButton(
               onPressed: () {
                 Navigator.of(dialogContext).pop();
                 Navigator.of(context).pushNamed(AppRoutes.edgeAiSettings);
               },
-              child: const Text('Download model'),
+              child: Text(copy.edgeAiDownloadModelLabel),
             ),
           ],
         );
@@ -367,32 +441,31 @@ class _AppHomePageState extends State<AppHomePage> {
     if (!mounted) {
       return;
     }
+    final copy = _copy;
     await showDialog<void>(
       context: context,
       builder: (dialogContext) {
         return AlertDialog(
-          title: const Text('Model AI lokal belum siap'),
-          content: const Text(
-            'Model sudah ada di device, tapi belum di-initialize. Mau initialize sekarang?',
-          ),
+          title: Text(copy.edgeAiModelNotInitializedTitle),
+          content: Text(copy.edgeAiModelNotInitializedMessage),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(dialogContext).pop(),
-              child: const Text('Nanti'),
+              child: Text(copy.laterLabel),
             ),
             TextButton(
               onPressed: () {
                 Navigator.of(dialogContext).pop();
                 Navigator.of(context).pushNamed(AppRoutes.edgeAiSettings);
               },
-              child: const Text('Buka settings'),
+              child: Text(copy.edgeAiOpenSettingsShortLabel),
             ),
             FilledButton(
               onPressed: () {
                 Navigator.of(dialogContext).pop();
                 _initializeEdgeModelQuick(status);
               },
-              child: const Text('Initialize'),
+              child: Text(copy.edgeAiInitializeLabel),
             ),
           ],
         );
@@ -407,10 +480,10 @@ class _AppHomePageState extends State<AppHomePage> {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(
-        const SnackBar(
-          content: Text('Menginisialisasi model lokal...'),
+        SnackBar(
+          content: Text(_copy.edgeAiInitializingModelLabel),
           behavior: SnackBarBehavior.floating,
-          duration: Duration(seconds: 2),
+          duration: const Duration(seconds: 2),
         ),
       );
     final modelPath = (status.modelPath ?? status.defaultModelPath ?? '')
@@ -429,8 +502,8 @@ class _AppHomePageState extends State<AppHomePage> {
           SnackBar(
             content: Text(
               success
-                  ? 'Model lokal siap dipakai.'
-                  : 'Initialize selesai tapi runtime belum ready. Coba buka settings AI lokal.',
+                  ? _copy.edgeAiModelReadyLabel
+                  : _copy.edgeAiInitializedNotReadyLabel,
             ),
             behavior: SnackBarBehavior.floating,
           ),
@@ -443,7 +516,7 @@ class _AppHomePageState extends State<AppHomePage> {
         ..hideCurrentSnackBar()
         ..showSnackBar(
           SnackBar(
-            content: Text('Initialize model gagal: $error'),
+            content: Text(_copy.edgeAiInitializeModelFailedLabel(error)),
             behavior: SnackBarBehavior.floating,
           ),
         );
@@ -722,6 +795,7 @@ class _AppHomePageState extends State<AppHomePage> {
       _lastPosttestTrackId = result.trackId;
       _lastPosttestModuleId = result.moduleId;
       _openPosttest(
+        posttestSessionId: result.posttestSessionId,
         workspaceSessionId: result.workspaceSessionId,
         trackId: result.trackId,
         moduleId: result.moduleId,
@@ -730,6 +804,7 @@ class _AppHomePageState extends State<AppHomePage> {
   }
 
   Future<void> _openPosttest({
+    String? posttestSessionId,
     String? workspaceSessionId,
     String? trackId,
     String? moduleId,
@@ -759,17 +834,24 @@ class _AppHomePageState extends State<AppHomePage> {
           : workspaceSessionId;
       final resolvedTrackId = trackId ?? _lastPosttestTrackId;
       final resolvedModuleId = moduleId ?? _lastPosttestModuleId;
-      final session = await widget.homeRepository.startPosttest(
-        workspaceSessionId: resolvedWorkspaceSessionId,
-        trackId:
-            resolvedWorkspaceSessionId == null && resolvedTrackId.isNotEmpty
-            ? resolvedTrackId
-            : null,
-        moduleId:
-            resolvedWorkspaceSessionId == null && resolvedModuleId.isNotEmpty
-            ? resolvedModuleId
-            : null,
-      );
+      final resolvedPosttestSessionId = (posttestSessionId ?? '').isEmpty
+          ? null
+          : posttestSessionId;
+      final session = resolvedPosttestSessionId != null
+          ? await widget.homeRepository.fetchPosttest(
+              sessionId: resolvedPosttestSessionId,
+            )
+          : await widget.homeRepository.startPosttest(
+              workspaceSessionId: resolvedWorkspaceSessionId,
+              trackId:
+                  resolvedWorkspaceSessionId == null && resolvedTrackId.isNotEmpty
+                  ? resolvedTrackId
+                  : null,
+              moduleId:
+                  resolvedWorkspaceSessionId == null && resolvedModuleId.isNotEmpty
+                  ? resolvedModuleId
+                  : null,
+            );
       if (!mounted) {
         return;
       }
@@ -839,11 +921,14 @@ class _AppHomePageState extends State<AppHomePage> {
       if (!mounted) {
         return;
       }
+      final refreshedSnapshot = widget.homeRepository.fetchSnapshot();
       setState(() {
         _isSubmittingPosttest = false;
         _posttestResult = result;
         _showPosttest = false;
         _showPosttestResult = true;
+        _homeSnapshotFuture = refreshedSnapshot;
+        _activeGoalFuture = _fetchActiveGoal();
       });
     } catch (error) {
       if (!mounted) {
@@ -910,6 +995,16 @@ class _AppHomePageState extends State<AppHomePage> {
 
   @override
   Widget build(BuildContext context) {
+    final teacherStudentRepository = widget.teacherStudentRepository;
+    if (widget.authController.session?.role == AuthRole.teacher &&
+        teacherStudentRepository != null) {
+      return TeacherDashboardPage(
+        repository: teacherStudentRepository,
+        reviewRepository: widget.reviewRepository,
+        onSignOut: _signOutTeacher,
+      );
+    }
+
     return AnimatedBuilder(
       animation: widget.onboardingController,
       builder: (context, _) {
@@ -918,7 +1013,10 @@ class _AppHomePageState extends State<AppHomePage> {
         );
 
         return Scaffold(
-          floatingActionButton: _homeFab(),
+          floatingActionButton: Padding(
+            padding: const EdgeInsets.only(bottom: 78),
+            child: _homeFab(),
+          ),
           body: _HomeCopyScope(
             copy: copy,
             child: SafeArea(
@@ -1008,24 +1106,18 @@ class _AppHomePageState extends State<AppHomePage> {
       if (_isLoadingPosttest) {
         return _DashboardStatePage(
           constraints: constraints,
-          title: copy.isIndonesian ? 'Memuat Posttest' : 'Loading Posttest',
-          message: copy.isIndonesian
-              ? 'Menyiapkan soal posttest adaptif dari backend.'
-              : 'Preparing adaptive posttest from backend.',
+          title: copy.loadingPosttestLabel,
+          message: copy.preparingAdaptivePosttestFromBackendLabel,
         );
       }
       if (_posttestError != null || _backendPosttestQuestions.isEmpty) {
         return _DashboardStatePage(
           constraints: constraints,
-          title: copy.isIndonesian
-              ? 'Posttest tidak tersedia'
-              : 'Posttest unavailable',
+          title: copy.posttestUnavailableLabel,
           message:
               _posttestError ??
-              (copy.isIndonesian
-                  ? 'Backend tidak mengembalikan soal posttest.'
-                  : 'Backend returned no posttest questions.'),
-          actionLabel: copy.isIndonesian ? 'Coba lagi' : 'Try again',
+              (copy.backendReturnedNoPosttestQuestionsLabel),
+          actionLabel: copy.tryAgainLabel2,
           onAction: () {
             _openPosttest(
               workspaceSessionId: _lastPosttestWorkspaceSessionId,
@@ -1050,11 +1142,9 @@ class _AppHomePageState extends State<AppHomePage> {
         onConfidenceChanged: _selectPosttestConfidence,
         isSubmitting: _isSubmittingPosttest,
         sectionLabel: session.title,
-        subtitle: copy.isIndonesian
-            ? '10 soal: 3 medium dan 7 hard berdasarkan materi yang kamu pelajari.'
-            : '10 questions: 3 medium and 7 hard based on what you learned.',
-        nextLabel: copy.isIndonesian ? 'Lanjut' : 'Continue',
-        finishLabel: copy.isIndonesian ? 'Selesai posttest' : 'Finish posttest',
+        subtitle: copy.questionsMediumHardBasedWhatLabel,
+        nextLabel: copy.continueLabel2,
+        finishLabel: copy.finishPosttestLabel,
         showContextPanels: false,
         showLanguageChip: false,
         onSubmit: () {
@@ -1075,27 +1165,19 @@ class _AppHomePageState extends State<AppHomePage> {
       if (_isLoadingDailyEvaluation) {
         return _DashboardStatePage(
           constraints: constraints,
-          title: copy.isIndonesian
-              ? 'Memuat Evaluasi Harian'
-              : 'Loading Daily Evals',
-          message: copy.isIndonesian
-              ? 'Mengambil soal spaced review dari backend.'
-              : 'Fetching spaced-review questions from backend.',
+          title: copy.loadingDailyEvalsLabel,
+          message: copy.fetchingSpacedReviewQuestionsFromLabel,
         );
       }
       if (_dailyEvaluationError != null ||
           _backendDailyEvaluationQuestions.isEmpty) {
         return _DashboardStatePage(
           constraints: constraints,
-          title: copy.isIndonesian
-              ? 'Evaluasi Harian tidak tersedia'
-              : 'Daily Evals unavailable',
+          title: copy.dailyEvalsUnavailableLabel,
           message:
               _dailyEvaluationError ??
-              (copy.isIndonesian
-                  ? 'Backend tidak mengembalikan soal review.'
-                  : 'Backend returned no review questions.'),
-          actionLabel: copy.isIndonesian ? 'Coba lagi' : 'Try again',
+              (copy.backendReturnedNoReviewQuestionsLabel),
+          actionLabel: copy.tryAgainLabel2,
           onAction: () {
             _openDailyEvaluation();
           },
@@ -1241,20 +1323,16 @@ class _HomeSnapshotBuilder extends StatelessWidget {
         if (snapshot.hasError) {
           return _DashboardStatePage(
             constraints: constraints,
-            title: copy.isIndonesian
-                ? 'Dashboard tidak tersedia'
-                : 'Dashboard unavailable',
+            title: copy.dashboardUnavailableLabel,
             message: snapshot.error.toString(),
-            actionLabel: copy.isIndonesian ? 'Coba lagi' : 'Retry',
+            actionLabel: copy.retryLabel2,
             onAction: onRetry,
           );
         }
         return _DashboardStatePage(
           constraints: constraints,
-          title: copy.isIndonesian ? 'Memuat dashboard' : 'Loading dashboard',
-          message: copy.isIndonesian
-              ? 'Mengambil profilmu dari backend.'
-              : 'Fetching your profile from backend.',
+          title: copy.loadingDashboardLabel,
+          message: copy.fetchingProfileFromBackendLabel,
         );
       },
     );
@@ -1280,13 +1358,13 @@ String _displayGradeSummary(HomeSnapshot snapshot, OnboardingCopy copy) {
 String _educationLabel(String value, OnboardingCopy copy) {
   final normalized = value.trim().toLowerCase();
   return switch (normalized) {
-    'sd' => copy.isIndonesian ? 'Sekolah dasar' : 'Elementary school',
-    'elementary' => copy.isIndonesian ? 'Sekolah dasar' : 'Elementary school',
-    'smp' => copy.isIndonesian ? 'SMP' : 'Junior high school',
-    'junior_high' => copy.isIndonesian ? 'SMP' : 'Junior high school',
-    'sma' => copy.isIndonesian ? 'SMA' : 'Senior high school',
-    'senior_high' => copy.isIndonesian ? 'SMA' : 'Senior high school',
-    'university' => copy.isIndonesian ? 'Universitas' : 'University',
+    'sd' => copy.elementarySchoolLabel,
+    'elementary' => copy.elementarySchoolLabel,
+    'smp' => copy.juniorHighSchoolLabel,
+    'junior_high' => copy.juniorHighSchoolLabel,
+    'sma' => copy.seniorHighSchoolLabel,
+    'senior_high' => copy.seniorHighSchoolLabel,
+    'university' => copy.universityLabel,
     _ => value,
   };
 }
@@ -1514,9 +1592,7 @@ class _ActivePretestCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      copy.isIndonesian
-                          ? 'Pretest belum selesai'
-                          : 'Pretest in progress',
+                      copy.pretestProgressLabel,
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
                         color: WicaraColors.text,
                         fontSize: 16,
@@ -1541,9 +1617,7 @@ class _ActivePretestCard extends StatelessWidget {
           ),
           const SizedBox(height: 14),
           Text(
-            copy.isIndonesian
-                ? 'Jawaban yang sudah dikirim tetap tersimpan. Lanjutkan dari soal terakhir.'
-                : 'Your submitted answers are saved. Continue from your latest question.',
+            copy.submittedAnswersSavedContinueFromLabel,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: WicaraColors.text,
               fontWeight: FontWeight.w600,
@@ -1552,7 +1626,7 @@ class _ActivePretestCard extends StatelessWidget {
           ),
           const SizedBox(height: 14),
           GradientButton(
-            label: copy.isIndonesian ? 'Lanjutkan pretest' : 'Continue pretest',
+            label: copy.continuePretestLabel,
             onPressed: onContinue,
           ),
         ],
@@ -1703,9 +1777,7 @@ class _BackendSubjectQueueContent extends StatelessWidget {
       children: [
         if (showCreateTrack && onCreateTrack != null) ...[
           GradientButton(
-            label: copy.isIndonesian
-                ? 'Buat goal belajar baru'
-                : 'Create learning goal',
+            label: copy.createLearningGoalLabel,
             onPressed: onCreateTrack,
           ),
           const SizedBox(height: 18),
@@ -1719,19 +1791,13 @@ class _BackendSubjectQueueContent extends StatelessWidget {
         if (goals.isEmpty) ...[
           _BackendEmptyPanel(
             icon: Icons.flag_outlined,
-            title: copy.isIndonesian
-                ? 'Belum ada goal ${copy.subjectLabel(activeSubject)}'
-                : 'No ${copy.subjectLabel(activeSubject)} goals yet',
-            message: copy.isIndonesian
-                ? 'Buat goal belajar baru agar WICARA bisa menyiapkan track dan workspace.'
-                : 'Create a learning goal so WICARA can prepare a track and workspace.',
+            title: copy.noSubjectGoalsYetLabel(copy.subjectLabel(activeSubject)),
+            message: copy.createLearningGoalSoWicaraLabel,
           ),
           if (onCreateTrack != null && !showCreateTrack) ...[
             const SizedBox(height: 14),
             GradientButton(
-              label: copy.isIndonesian
-                  ? 'Buat goal belajar baru'
-                  : 'Create learning goal',
+              label: copy.createLearningGoalLabel,
               onPressed: onCreateTrack,
             ),
           ],
@@ -1902,9 +1968,7 @@ class _GoalHistorySectionHeader extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  copy.isIndonesian
-                      ? 'Goal ${copy.subjectLabel(subject)}'
-                      : '${copy.subjectLabel(subject)} goals',
+                  copy.subjectGoalsLabel(copy.subjectLabel(subject)),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
@@ -1914,9 +1978,7 @@ class _GoalHistorySectionHeader extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  copy.isIndonesian
-                      ? 'Pilih goal subject ini dulu sebelum masuk workspace.'
-                      : 'Pick a goal in this subject before opening workspace.',
+                  copy.pickGoalSubjectBeforeOpeningLabel,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
@@ -2031,9 +2093,7 @@ class _GoalHistoryCard extends StatelessWidget {
                                 color: statusColor,
                               ),
                               _GoalMetaPill(
-                                copy.isIndonesian
-                                    ? '${track.progressPercent}% selesai'
-                                    : '${track.progressPercent}% complete',
+                                copy.percentCompleteLabel(track.progressPercent),
                               ),
                             ],
                           ),
@@ -2067,9 +2127,7 @@ class _GoalHistoryCard extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         Text(
-                          copy.isIndonesian
-                              ? 'Modul berikutnya'
-                              : 'Next module',
+                          copy.nextModuleLabel,
                           style: Theme.of(context).textTheme.labelLarge
                               ?.copyWith(
                                 color: WicaraColors.ink,
@@ -2274,19 +2332,19 @@ String _goalStatusLabel(String status, OnboardingCopy copy) {
   switch (status.toLowerCase().replaceAll('_', ' ')) {
     case 'active':
     case 'in progress':
-      return copy.isIndonesian ? 'Sedang belajar' : 'In progress';
+      return copy.progressLabel2;
     case 'ready':
-      return copy.isIndonesian ? 'Siap lanjut' : 'Ready';
+      return copy.readyLabel;
     case 'completed':
     case 'complete':
-      return copy.isIndonesian ? 'Selesai' : 'Completed';
+      return copy.completedLabel;
     case 'paused':
-      return copy.isIndonesian ? 'Dijeda' : 'Paused';
+      return copy.pausedLabel;
     case 'review':
     case 'needs review':
-      return copy.isIndonesian ? 'Perlu review' : 'Needs review';
+      return copy.needsReviewLabel2;
     default:
-      return status.isEmpty ? (copy.isIndonesian ? 'Aktif' : 'Active') : status;
+      return status.isEmpty ? (copy.activeLabel) : status;
   }
 }
 
@@ -2306,9 +2364,7 @@ Color _goalStatusColor(String status) {
 }
 
 String _missingModuleLabel(OnboardingCopy copy) {
-  return copy.isIndonesian
-      ? 'Belum ada modul yang siap'
-      : 'No module is ready yet';
+  return copy.noModuleReadyYetLabel;
 }
 
 String _goalPreviewLabel(
@@ -2323,9 +2379,7 @@ String _goalPreviewLabel(
   if (title.isNotEmpty) {
     return title;
   }
-  return copy.isIndonesian
-      ? 'Goal ini belum punya modul aktif.'
-      : 'This goal does not have an active module yet.';
+  return copy.goalDoesNotHaveActiveLabel;
 }
 
 String _goalActivityLabel(
@@ -2333,20 +2387,14 @@ String _goalActivityLabel(
   OnboardingCopy copy,
 ) {
   if (module == null) {
-    return copy.isIndonesian
-        ? 'Buat atau pilih goal lain untuk mulai belajar.'
-        : 'Create or choose another goal to start learning.';
+    return copy.createChooseAnotherGoalStartLabel;
   }
   final minutes = module.estimatedMinutes;
   final status = _goalStatusLabel(module.status, copy).toLowerCase();
   if (minutes <= 0) {
-    return copy.isIndonesian
-        ? 'Status modul: $status'
-        : 'Module status: $status';
+    return copy.moduleStatusLabel(status);
   }
-  return copy.isIndonesian
-      ? '$minutes menit - status modul: $status'
-      : '$minutes min - module status: $status';
+  return copy.moduleStatusWithMinutesLabel(minutes, status);
 }
 
 class _BackendGalleryContent extends StatelessWidget {
@@ -2399,12 +2447,8 @@ class _BackendGalleryContent extends StatelessWidget {
               const SizedBox(height: 13),
               Text(
                 items.isEmpty
-                    ? (copy.isIndonesian
-                          ? 'Belum ada video yang selesai dibuat.'
-                          : 'No generated videos are ready yet.')
-                    : (copy.isIndonesian
-                          ? 'Video dari job backend tersimpan di sini.'
-                          : 'Videos from backend jobs are saved here.'),
+                    ? (copy.noGeneratedVideosReadyYetLabel)
+                    : (copy.videosFromBackendJobsSavedLabel),
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: WicaraColors.muted,
                   fontWeight: FontWeight.w600,
@@ -2553,6 +2597,10 @@ class _GalleryArtifactDetailDialog extends StatefulWidget {
 
 class _GalleryArtifactDetailDialogState
     extends State<_GalleryArtifactDetailDialog> {
+  /// Non-listening lookup: `_initialize` runs from `initState`, where
+  /// registering an inherited-widget dependency is not allowed.
+  OnboardingCopy get _copy => WicaraCopyScope.read(context);
+
   VideoPlayerController? _controller;
   bool _isLoading = true;
   String? _errorMessage;
@@ -2570,7 +2618,7 @@ class _GalleryArtifactDetailDialogState
     if (videoUrl.isEmpty) {
       setState(() {
         _isLoading = false;
-        _errorMessage = 'Video URL is missing for this artifact.';
+        _errorMessage = _copy.videoUrlMissingLabel;
       });
       return;
     }
@@ -2598,7 +2646,7 @@ class _GalleryArtifactDetailDialogState
       if (!mounted) return;
       setState(() {
         _isLoading = false;
-        _errorMessage = 'Failed to load this video.';
+        _errorMessage = _copy.videoLoadFailedLabel;
       });
     }
   }
@@ -2721,7 +2769,9 @@ class _GalleryArtifactDetailDialogState
                   onPressed: () => _openFullscreenPlayer(controller),
                   icon: const Icon(Icons.open_in_full_rounded),
                   color: foreground,
-                  tooltip: 'Open fullscreen',
+                  // Dialog routes sit outside _HomeCopyScope; use the
+                  // app-wide scope installed above MaterialApp.
+                  tooltip: WicaraCopyScope.of(context).openFullscreenLabel,
                 ),
               IconButton(
                 onPressed: () => Navigator.of(context).pop(),
@@ -3306,9 +3356,7 @@ class _DailyEvaluationUnavailableCard extends StatelessWidget {
           ),
           const SizedBox(height: 11),
           Text(
-            copy.isIndonesian
-                ? 'Belum ada evaluasi harian yang ditugaskan.'
-                : 'No daily evaluation assigned yet.',
+            copy.noDailyEvaluationAssignedYetLabel,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: WicaraColors.muted,
               fontWeight: FontWeight.w600,
@@ -3325,7 +3373,7 @@ class _DailyEvaluationUnavailableCard extends StatelessWidget {
               ),
             ),
             child: Text(
-              copy.isIndonesian ? 'Belum ada evaluasi' : 'No evaluation',
+              copy.noEvaluationLabel,
             ),
           ),
         ],
@@ -3503,7 +3551,7 @@ class _DailyEvaluationQuestionPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final copy = _HomeCopyScope.of(context);
-    final locale = copy.isIndonesian ? 'id-ID' : 'en-US';
+    final locale = copy.speechLocale;
     final questionSpeech = <String>[
       question.prompt,
       question.helper,
@@ -3539,7 +3587,7 @@ class _DailyEvaluationQuestionPage extends StatelessWidget {
                 fallback: resolvedSectionLabel,
                 copy: copy,
               ),
-              languageCode: copy.isIndonesian ? 'ID' : 'EN',
+              languageCode: copy.languageCode,
               showLanguageChip: showLanguageChip,
               onBack: onBack,
               leadingIcon: Icons.close_rounded,
@@ -3682,16 +3730,12 @@ class _PosttestConfidenceSelector extends StatelessWidget {
     final copy = _HomeCopyScope.of(context);
     return Semantics(
       container: true,
-      label: copy.isIndonesian
-          ? 'Tingkat keyakinan jawaban'
-          : 'Answer confidence level',
+      label: copy.answerConfidenceLevelLabel,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            copy.isIndonesian
-                ? 'Seberapa yakin dengan jawabanmu?'
-                : 'How confident are you in your answer?',
+            copy.howConfidentAnswerLabel,
             style: Theme.of(context).textTheme.titleSmall?.copyWith(
               color: WicaraColors.ink,
               fontWeight: FontWeight.w700,
@@ -3699,9 +3743,7 @@ class _PosttestConfidenceSelector extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            copy.isIndonesian
-                ? 'Pilih 0 (tidak yakin) sampai 10 (sangat yakin).'
-                : 'Choose 0 (not confident) to 10 (very confident).',
+            copy.chooseNotConfidentVeryConfidentLabel,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: WicaraColors.muted,
               height: 1.3,
@@ -4252,7 +4294,7 @@ class _EvaluationCompletePage extends StatelessWidget {
     final scoreFraction =
         ((result?.scorePercent ?? 0).clamp(0, 100).toDouble()) / 100;
     final copy = _HomeCopyScope.of(context);
-    final locale = copy.isIndonesian ? 'id-ID' : 'en-US';
+    final locale = copy.speechLocale;
     final resultSpeech = <String>[
       copy.evaluationCompleteLabel,
       copy.evaluationCompleteSubtitle,
@@ -4270,7 +4312,7 @@ class _EvaluationCompletePage extends StatelessWidget {
           children: [
             _LearningSurfaceHeader(
               title: copy.evaluationCompleteLabel,
-              languageCode: copy.isIndonesian ? 'ID' : 'EN',
+              languageCode: copy.languageCode,
               onBack: onBackHome,
             ),
             const SizedBox(height: 25),
@@ -4372,7 +4414,7 @@ class _PosttestAnalysisPage extends StatelessWidget {
     final progressionMessage = _posttestProgressionMessage(
       progression: progression,
       passed: passed,
-      isIndonesian: copy.isIndonesian,
+      copy: copy,
     );
     final scoreFraction =
         ((resolved?.scorePercent ?? 0).clamp(0, 100).toDouble()) / 100;
@@ -4385,13 +4427,11 @@ class _PosttestAnalysisPage extends StatelessWidget {
       0,
       (sum, node) => sum + node.totalQuestions,
     );
-    final locale = copy.isIndonesian ? 'id-ID' : 'en-US';
+    final locale = copy.speechLocale;
     final resultSpeech = <String>[
       passed
-          ? (copy.isIndonesian ? 'Mastery terkonfirmasi' : 'Mastery confirmed')
-          : (copy.isIndonesian
-                ? 'Perlu review dari hasil posttest'
-                : 'Review needed from posttest results'),
+          ? (copy.masteryConfirmedLabel)
+          : (copy.reviewNeededFromPosttestResultsLabel),
       '${resolved?.scorePercent ?? 0} percent',
       '$correctCount of $totalQuestions correct',
       for (final node in nodes)
@@ -4406,20 +4446,16 @@ class _PosttestAnalysisPage extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             _LearningSurfaceHeader(
-              title: copy.isIndonesian ? 'Hasil Posttest' : 'Posttest Results',
-              languageCode: copy.isIndonesian ? 'ID' : 'EN',
+              title: copy.posttestResultsLabel,
+              languageCode: copy.languageCode,
               showLanguageChip: false,
               onBack: onBackHome,
             ),
             const SizedBox(height: 25),
             Text(
               passed
-                  ? (copy.isIndonesian
-                        ? 'Mastery terkonfirmasi'
-                        : 'Mastery confirmed')
-                  : (copy.isIndonesian
-                        ? 'Perlu review dari hasil posttest'
-                        : 'Review needed from posttest results'),
+                  ? (copy.masteryConfirmedLabel)
+                  : (copy.reviewNeededFromPosttestResultsLabel),
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.titleLarge?.copyWith(
                 fontSize: 20,
@@ -4428,9 +4464,7 @@ class _PosttestAnalysisPage extends StatelessWidget {
             ),
             const SizedBox(height: 9),
             Text(
-              copy.isIndonesian
-                  ? 'Ringkasan skor dan keputusan kelanjutan belajar berasal dari backend.'
-                  : 'The score summary and learning progression decision come from the backend.',
+              copy.scoreSummaryLearningProgressionDecisionLabel,
               textAlign: TextAlign.center,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: WicaraColors.muted,
@@ -4455,16 +4489,14 @@ class _PosttestAnalysisPage extends StatelessWidget {
                       children: [
                         _EvaluationStat(
                           value: _percentText(resolved?.answerPercent ?? 0),
-                          label: copy.isIndonesian
-                              ? 'Correctness'
-                              : 'Correctness',
+                          label: copy.correctnessLabel,
                         ),
                         const SizedBox(height: 17),
                         _EvaluationStat(
                           value: totalQuestions == 0
                               ? '0/0'
                               : '$correctCount/$totalQuestions',
-                          label: copy.isIndonesian ? 'Benar' : 'Correct',
+                          label: copy.correctLabel2,
                         ),
                         const SizedBox(height: 17),
                         _EvaluationStat(
@@ -4472,10 +4504,8 @@ class _PosttestAnalysisPage extends StatelessWidget {
                               ? (passed ? 'Passed' : 'Review')
                               : '${progression!.trackProgressPercent}%',
                           label: progression?.trackProgressPercent == null
-                              ? (copy.isIndonesian ? 'Keputusan' : 'Decision')
-                              : (copy.isIndonesian
-                                    ? 'Progress track'
-                                    : 'Track progress'),
+                              ? (copy.decisionLabel)
+                              : (copy.trackProgressLabel),
                         ),
                       ],
                     ),
@@ -4516,10 +4546,8 @@ class _PosttestAnalysisPage extends StatelessWidget {
             const SizedBox(height: 28),
             _BackHomeButton(
               label: passed
-                  ? (copy.isIndonesian ? 'Lanjut belajar' : 'Continue learning')
-                  : (copy.isIndonesian
-                        ? 'Review area lemah'
-                        : 'Review weak areas'),
+                  ? (copy.continueLearningLabel2)
+                  : (copy.reviewWeakAreasLabel),
               onPressed: onBackHome,
             ),
           ],
@@ -4532,35 +4560,25 @@ class _PosttestAnalysisPage extends StatelessWidget {
 String _posttestProgressionMessage({
   required PosttestProgression? progression,
   required bool passed,
-  required bool isIndonesian,
+  required OnboardingCopy copy,
 }) {
   if (passed) {
     if (progression?.nextModuleId != null) {
-      return isIndonesian
-          ? 'Modul ini selesai dan modul berikutnya sudah dibuka.'
-          : 'This module is complete and the next module is now available.';
+      return copy.moduleCompleteNextModuleNowLabel;
     }
     if (progression?.goalStatus == 'completed') {
-      return isIndonesian
-          ? 'Target belajar ini sudah diselesaikan.'
-          : 'This learning goal is complete.';
+      return copy.learningGoalCompleteLabel;
     }
-    return isIndonesian
-        ? 'Backend mengonfirmasi modul ini lulus. Muat ulang Beranda untuk melihat kelanjutan track.'
-        : 'The backend confirmed this module as passed. Refresh Home to see the next track step.';
+    return copy.backendConfirmedModuleAsPassedLabel;
   }
 
   final phase = progression?.remediationPhase;
   final reason = progression?.remediationReason;
   if (phase != null && phase.isNotEmpty) {
     final detail = reason == null || reason.isEmpty ? '' : ' $reason';
-    return isIndonesian
-        ? 'Sesi dikembalikan ke fase ${phase.toUpperCase()} untuk remediasi.$detail'
-        : 'The session returns to ${phase.toUpperCase()} for remediation.$detail';
+    return copy.sessionReturnsToPhaseLabel(phase.toUpperCase(), detail);
   }
-  return isIndonesian
-      ? 'Backend meminta review area yang masih lemah sebelum mencoba lagi.'
-      : 'The backend requires review of the remaining weak areas before another attempt.';
+  return copy.backendRequiresReviewRemainingWeakLabel;
 }
 
 class _PosttestNodeResultsPanel extends StatelessWidget {
@@ -4577,7 +4595,7 @@ class _PosttestNodeResultsPanel extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            copy.isIndonesian ? 'Hasil konsep' : 'Concept results',
+            copy.conceptResultsLabel,
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
               fontSize: 16,
               fontWeight: FontWeight.w700,
@@ -4586,9 +4604,7 @@ class _PosttestNodeResultsPanel extends StatelessWidget {
           const SizedBox(height: 12),
           if (nodes.isEmpty)
             Text(
-              copy.isIndonesian
-                  ? 'Belum ada node posttest yang dinilai.'
-                  : 'No posttest nodes have been evaluated yet.',
+              copy.noPosttestNodesHaveBeenLabel,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: WicaraColors.muted,
                 fontWeight: FontWeight.w600,
@@ -4650,11 +4666,11 @@ class _PosttestNodeResultRow extends StatelessWidget {
             runSpacing: 8,
             children: [
               _PosttestMetricChip(
-                label: copy.isIndonesian ? 'Benar' : 'Correct',
+                label: copy.correctLabel2,
                 value: _percentText(node.answerPercent),
               ),
               _PosttestMetricChip(
-                label: copy.isIndonesian ? 'Skor' : 'Score',
+                label: copy.scoreLabel2,
                 value: node.scaledScore.toStringAsFixed(1),
               ),
             ],
@@ -4662,12 +4678,8 @@ class _PosttestNodeResultRow extends StatelessWidget {
           const SizedBox(height: 9),
           Text(
             node.passed
-                ? (copy.isIndonesian
-                      ? '${node.correctCount}/${node.totalQuestions} jawaban benar. Target ini lulus.'
-                      : '${node.correctCount}/${node.totalQuestions} correct. This target passed.')
-                : (copy.isIndonesian
-                      ? '${node.correctCount}/${node.totalQuestions} jawaban benar. Backend menandai konsep ini untuk review.'
-                      : '${node.correctCount}/${node.totalQuestions} correct. The backend marked this concept for review.'),
+                ? (copy.targetPassedLabel(node.correctCount, node.totalQuestions))
+                : (copy.conceptMarkedForReviewLabel(node.correctCount, node.totalQuestions)),
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: statusColor,
               fontWeight: FontWeight.w700,
@@ -5213,7 +5225,7 @@ class _SpacedRepetitionImpactPanel extends StatelessWidget {
             children: [
               Expanded(
                 child: Text(
-                  'Spaced repetition impact',
+                  copy.spacedRepetitionImpactLabel,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
@@ -5247,7 +5259,7 @@ class _SpacedRepetitionImpactPanel extends StatelessWidget {
               Expanded(
                 child: _ImpactMetric(
                   value: '+${impact.retentionLiftPercent}%',
-                  label: 'Retention Lift',
+                  label: copy.retentionLiftShortLabel,
                   icon: Icons.arrow_upward_rounded,
                   iconColor: WicaraColors.primary,
                 ),
@@ -5608,6 +5620,7 @@ class _RecommendedQueueContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final copy = _HomeCopyScope.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -5615,13 +5628,12 @@ class _RecommendedQueueContent extends StatelessWidget {
         const SizedBox(height: 22),
         _QueueLessonCard(
           index: '1',
-          badge: 'Next up',
-          title: 'Limits from graphs',
-          subject: 'Calculus I',
-          reason:
-              'Why now? This unlocks continuity and\nfirst derivative intuition.',
-          meta: '18 min   •   Medium',
-          action: 'Continue',
+          badge: copy.nextUpLabel,
+          title: copy.demoLimitsFromGraphsTitle,
+          subject: copy.demoCalculusOneLabel,
+          reason: copy.demoLimitsFromGraphsReason,
+          meta: copy.demoLessonMetaLabel(18, 'medium'),
+          action: copy.continueLabel,
           iconText: 'lim',
           isPrimary: true,
           onActionPressed: onContinue,
@@ -5629,24 +5641,22 @@ class _RecommendedQueueContent extends StatelessWidget {
         const SizedBox(height: 20),
         _QueueLessonCard(
           index: '2',
-          title: 'Derivative rules',
-          subject: 'Calculus',
-          reason:
-              "Why now? You're ready after limits and\nslope interpretation.",
-          meta: '24 min   •   Hard',
-          action: 'Continue',
+          title: copy.demoDerivativeRulesTitle,
+          subject: copy.demoCalculusLabel,
+          reason: copy.demoDerivativeRulesReason,
+          meta: copy.demoLessonMetaLabel(24, 'hard'),
+          action: copy.continueLabel,
           iconText: 'd\ndx',
           onActionPressed: onContinue,
         ),
         const SizedBox(height: 20),
         _QueueLessonCard(
           index: '3',
-          title: 'Function composition review',
-          subject: 'Prerequisite',
-          reason:
-              'Why now? Needed before chain rule and\nimplicit differentiation.',
-          meta: '12 min   •   Easy',
-          action: 'Review',
+          title: copy.demoFunctionCompositionTitle,
+          subject: copy.prerequisitesLabel,
+          reason: copy.demoFunctionCompositionReason,
+          meta: copy.demoLessonMetaLabel(12, 'easy'),
+          action: copy.reviewNowShortLabel,
           iconData: Icons.event_note_outlined,
           onActionPressed: onContinue,
         ),
@@ -5666,33 +5676,34 @@ class _TracksQueueContent extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final copy = _HomeCopyScope.of(context);
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _NewTrackCard(onCreateTrack: onCreateTrack),
         const SizedBox(height: 22),
         _TrackCard(
-          title: 'Continue Calculus I',
-          subtitle: 'Limits, derivatives, applications',
-          meta: 'Current track   •   58% complete',
+          title: copy.demoContinueCalculusTitle,
+          subtitle: copy.demoContinueCalculusSubtitle,
+          meta: copy.demoCurrentTrackMeta(58),
           icon: Icons.show_chart_rounded,
           color: WicaraColors.secondary,
           onContinue: onContinue,
         ),
         const SizedBox(height: 12),
         _TrackCard(
-          title: 'Linear Algebra',
-          subtitle: 'Vectors, matrices, transformations',
-          meta: 'Created track   •   12% complete',
+          title: copy.demoLinearAlgebraTitle,
+          subtitle: copy.demoLinearAlgebraSubtitle,
+          meta: copy.demoCreatedTrackMeta(12),
           icon: Icons.grid_4x4_rounded,
           color: WicaraColors.primary,
           onContinue: onContinue,
         ),
         const SizedBox(height: 12),
         _TrackCard(
-          title: 'Discrete Math',
-          subtitle: 'Logic, sets, graphs, counting',
-          meta: 'Created track   •   ready to continue',
+          title: copy.demoDiscreteMathTitle,
+          subtitle: copy.demoDiscreteMathSubtitle,
+          meta: copy.demoCreatedTrackReadyMeta,
           icon: Icons.hub_outlined,
           color: WicaraColors.accentCoral,
           onContinue: onContinue,
@@ -5759,15 +5770,15 @@ class _GalleryQueueContent extends StatelessWidget {
         ),
         const SizedBox(height: 22),
         _GalleryArtifactCard(
-          title: 'Derivatives intuition',
-          subtitle: 'What does a derivative tell us?',
+          title: copy.demoDerivativesIntuitionTitle,
+          subtitle: copy.demoDerivativesIntuitionSubtitle,
           duration: '06:45',
           onTap: onOpenDetail,
         ),
         const SizedBox(height: 12),
-        const _GalleryArtifactCard(
-          title: 'Limits from graphs',
-          subtitle: 'Approaching a value without touching it',
+        _GalleryArtifactCard(
+          title: copy.demoLimitsFromGraphsTitle,
+          subtitle: copy.demoLimitsFromGraphsSubtitle,
           duration: '04:18',
         ),
       ],
@@ -5871,6 +5882,7 @@ class _GalleryVideoDetail extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final copy = _HomeCopyScope.of(context);
     return SingleChildScrollView(
       padding: const EdgeInsets.fromLTRB(28, 14, 28, 118),
       child: ConstrainedBox(
@@ -5881,14 +5893,14 @@ class _GalleryVideoDetail extends StatelessWidget {
             _QueueHeader(onBack: onBack),
             const SizedBox(height: 32),
             Text(
-              'Derivatives intuition',
+              copy.demoDerivativesIntuitionTitle,
               style: Theme.of(
                 context,
               ).textTheme.headlineMedium?.copyWith(fontSize: 22, height: 1.12),
             ),
             const SizedBox(height: 5),
             Text(
-              'What does a derivative tell us?',
+              copy.demoDerivativesIntuitionSubtitle,
               style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                 color: WicaraColors.muted,
                 fontWeight: FontWeight.w600,
@@ -7019,9 +7031,7 @@ class _ProfilePage extends StatelessWidget {
         ..showSnackBar(
           SnackBar(
             content: Text(
-              copy.isIndonesian
-                  ? 'Profil berhasil diperbarui.'
-                  : 'Profile updated.',
+              copy.profileUpdatedLabel,
             ),
             behavior: SnackBarBehavior.floating,
           ),
@@ -7264,7 +7274,8 @@ class _ProfilePage extends StatelessWidget {
             const SizedBox(height: 28),
             _ProfileHeaderCard(
               snapshot: snapshot,
-              roleLabel: copy.learnerLabel,
+              roleLabel:
+                  authController.session?.role.label ?? copy.learnerLabel,
             ),
             const SizedBox(height: 22),
             _ProfileSection(
@@ -7302,12 +7313,8 @@ class _ProfilePage extends StatelessWidget {
               children: [
                 _ProfileSettingTile(
                   icon: Icons.memory_rounded,
-                  label: copy.isIndonesian
-                      ? 'AI Lokal (LiteRT-LM)'
-                      : 'Local AI (LiteRT-LM)',
-                  value: copy.isIndonesian
-                      ? 'Install & initialize model'
-                      : 'Install & initialize model',
+                  label: copy.localAiLitertLmLabel,
+                  value: copy.installInitializeModelLabel,
                   onTap: () => _openEdgeAiSettings(context),
                 ),
                 _ProfileSettingTile(
@@ -7915,24 +7922,18 @@ class _LearningReportOptionState extends State<_LearningReportOption> {
           }
           if (snapshot.hasError) {
             return _LearningReportPreviewState(
-              label: copy.isIndonesian
-                  ? 'Laporan belum tersedia'
-                  : 'Report unavailable',
-              badge: copy.isIndonesian ? 'Buka detail' : 'Open details',
+              label: copy.reportUnavailableLabel,
+              badge: copy.openDetailsLabel,
               message: _reportErrorMessage(
                 snapshot.error,
-                isIndonesian: copy.isIndonesian,
+                copy: copy,
               ),
             );
           }
           return _LearningReportPreviewState(
-            label: copy.isIndonesian
-                ? 'Memuat minggu ini'
-                : 'Loading this week',
-            badge: copy.isIndonesian ? 'Sinkron' : 'Syncing',
-            message: copy.isIndonesian
-                ? 'Mengambil data laporan dari backend.'
-                : 'Fetching report data from backend.',
+            label: copy.loadingWeekLabel,
+            badge: copy.syncingLabel,
+            message: copy.fetchingReportDataFromBackendLabel,
           );
         },
       ),
@@ -7976,9 +7977,7 @@ class _LearningReportPreview extends StatelessWidget {
             ),
             const SizedBox(width: 12),
             _SoftBadge(
-              copy.isIndonesian
-                  ? 'Akurasi ${report.score}%'
-                  : 'Accuracy ${report.score}%',
+              copy.accuracyPercentLabel(report.score),
             ),
           ],
         ),
@@ -7987,11 +7986,9 @@ class _LearningReportPreview extends StatelessWidget {
           height: 96,
           child: timeline.isEmpty
               ? _LearningReportPreviewState(
-                  label: copy.isIndonesian ? 'Belum ada data' : 'No data yet',
-                  badge: copy.isIndonesian ? 'Mulai' : 'Start',
-                  message: copy.isIndonesian
-                      ? 'Kerjakan evaluasi harian dulu supaya grafik terisi.'
-                      : 'Take daily evaluations first to populate this chart.',
+                  label: copy.noDataYetLabel,
+                  badge: copy.startLabel,
+                  message: copy.takeDailyEvaluationsFirstPopulateLabel,
                   compact: true,
                 )
               : Row(
@@ -8013,9 +8010,9 @@ class _LearningReportPreview extends StatelessWidget {
           children: [
             Expanded(
               child: _PreviewInsightTile(
-                label: copy.isIndonesian ? 'Tren 4 minggu' : '4-week trend',
+                label: copy.weekTrendLabel,
                 value: timeline.length >= 2
-                    ? '${_signedPoint(trendDelta)} ${copy.isIndonesian ? 'poin' : 'pts'}'
+                    ? '${_signedPoint(trendDelta)} ${copy.ptsLabel}'
                     : '--',
                 valueColor: timeline.length < 2
                     ? WicaraColors.muted
@@ -8027,9 +8024,7 @@ class _LearningReportPreview extends StatelessWidget {
             const SizedBox(width: 10),
             Expanded(
               child: _PreviewInsightTile(
-                label: copy.isIndonesian
-                    ? 'Rata-rata akurasi'
-                    : 'Average accuracy',
+                label: copy.averageAccuracyLabel,
                 value: '$averageScore%',
                 valueColor: WicaraColors.secondaryDeep,
               ),
@@ -8039,7 +8034,7 @@ class _LearningReportPreview extends StatelessWidget {
         if (hasPairedEvidence) ...[
           const SizedBox(height: 10),
           _PreviewScoreSummaryCard(
-            isIndonesian: copy.isIndonesian,
+            copy: copy,
             pretestScore: report.pretestScorePercent ?? 0,
             posttestScore: report.posttestScorePercent ?? 0,
             learningGainPercent: report.learningGainPercent ?? 0,
@@ -8189,13 +8184,13 @@ class _PreviewScoreTile extends StatelessWidget {
 
 class _PreviewScoreSummaryCard extends StatelessWidget {
   const _PreviewScoreSummaryCard({
-    required this.isIndonesian,
+    required this.copy,
     required this.pretestScore,
     required this.posttestScore,
     required this.learningGainPercent,
   });
 
-  final bool isIndonesian;
+  final OnboardingCopy copy;
   final int pretestScore;
   final int posttestScore;
   final int learningGainPercent;
@@ -8213,7 +8208,7 @@ class _PreviewScoreSummaryCard extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            isIndonesian ? 'Nilai (Score)' : 'Scores',
+            copy.scoresLabel,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: WicaraColors.text,
               fontWeight: FontWeight.w800,
@@ -8221,9 +8216,7 @@ class _PreviewScoreSummaryCard extends StatelessWidget {
           ),
           const SizedBox(height: 3),
           Text(
-            isIndonesian
-                ? 'Pre-test, Post-test, dan Perubahan adalah perubahan nilai rata-rata.'
-                : 'Pre-test, Post-test, and Change represent average score movement.',
+            copy.preTestPostTestChangeLabel,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: WicaraColors.muted,
               fontSize: 11,
@@ -8235,21 +8228,21 @@ class _PreviewScoreSummaryCard extends StatelessWidget {
             children: [
               Expanded(
                 child: _PreviewScoreTile(
-                  label: 'Pre-test',
+                  label: copy.preTestLabel2,
                   value: '$pretestScore%',
                 ),
               ),
               const SizedBox(width: 8),
               Expanded(
                 child: _PreviewScoreTile(
-                  label: 'Post-test',
+                  label: copy.postTestLabel2,
                   value: '$posttestScore%',
                 ),
               ),
               const SizedBox(width: 8),
               Expanded(
                 child: _PreviewScoreTile(
-                  label: isIndonesian ? 'Perubahan' : 'Change',
+                  label: copy.changeLabel,
                   value: _signedPercent(learningGainPercent),
                   valueColor: learningGainPercent >= 0
                       ? WicaraColors.secondary
@@ -8401,25 +8394,19 @@ class _LearningReportDetailState extends State<_LearningReportDetail> {
         if (snapshot.hasError) {
           return _DashboardStatePage(
             constraints: widget.constraints,
-            title: copy.isIndonesian
-                ? 'Laporan Belajar belum tersedia'
-                : 'Learning report is unavailable',
+            title: copy.learningReportUnavailableLabel,
             message: _reportErrorMessage(
               snapshot.error,
-              isIndonesian: copy.isIndonesian,
+              copy: copy,
             ),
-            actionLabel: copy.isIndonesian ? 'Coba lagi' : 'Try again',
+            actionLabel: copy.tryAgainLabel2,
             onAction: _retryReport,
           );
         }
         return _DashboardStatePage(
           constraints: widget.constraints,
-          title: copy.isIndonesian
-              ? 'Memuat Laporan Belajar'
-              : 'Loading Learning Report',
-          message: copy.isIndonesian
-              ? 'Mengambil ringkasan progres mingguan.'
-              : 'Fetching weekly progress summary.',
+          title: copy.loadingLearningReportLabel,
+          message: copy.fetchingWeeklyProgressSummaryLabel,
         );
       },
     );
@@ -8449,18 +8436,14 @@ class _LearningReportContent extends StatelessWidget {
         GapMetric(
           count: report.fixedGaps,
           weeklyDelta: report.fixedGapsDelta,
-          deltaLabel: copy.isIndonesian
-              ? '+${report.fixedGapsDelta} minggu ini'
-              : '+${report.fixedGapsDelta} this week',
+          deltaLabel: copy.fixedGapsDeltaLabel(report.fixedGapsDelta),
         );
     final remaining =
         report.gapMetrics['remaining'] ??
         GapMetric(
           count: report.remainingGaps,
           weeklyDelta: report.remainingGapsDelta,
-          deltaLabel: copy.isIndonesian
-              ? '${report.remainingGapsDelta} minggu ini'
-              : '${report.remainingGapsDelta} this week',
+          deltaLabel: copy.remainingGapsDeltaLabel(report.remainingGapsDelta),
         );
 
     return SingleChildScrollView(
@@ -8565,7 +8548,7 @@ class _DataTrustPanel extends StatelessWidget {
               _SoftBadge(
                 _coverageStatusLabel(
                   quality.coverageStatus,
-                  isIndonesian: copy.isIndonesian,
+                  copy: copy,
                 ),
               ),
             ],
@@ -8582,7 +8565,7 @@ class _DataTrustPanel extends StatelessWidget {
           Text(
             _coverageStatusExplanation(
               quality.coverageStatus,
-              isIndonesian: copy.isIndonesian,
+              copy: copy,
             ),
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: WicaraColors.muted,
@@ -8629,7 +8612,7 @@ class _OutcomeSnapshotPanel extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            copy.isIndonesian ? 'Ringkasan Minggu Ini' : 'This Week Summary',
+            copy.weekSummaryLabel,
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
               fontSize: 16,
               fontWeight: FontWeight.w700,
@@ -8640,9 +8623,7 @@ class _OutcomeSnapshotPanel extends StatelessWidget {
             children: [
               Expanded(
                 child: _ReportMetric(
-                  label: copy.isIndonesian
-                      ? 'Akurasi Jawaban'
-                      : 'Answer Accuracy',
+                  label: copy.answerAccuracyLabel,
                   value: '${report.score}%',
                   delta: _signedPercent(gain),
                 ),
@@ -8650,26 +8631,24 @@ class _OutcomeSnapshotPanel extends StatelessWidget {
               const SizedBox(width: 10),
               Expanded(
                 child: _ReportMetric(
-                  label: copy.isIndonesian ? 'Gap Tertutup' : 'Fixed Gaps',
+                  label: copy.fixedGapsLabel2,
                   value: '${fixed.count}',
-                  delta: _deltaLabel(fixed.weeklyDelta, copy.isIndonesian),
+                  delta: _deltaLabel(fixed.weeklyDelta, copy),
                 ),
               ),
               const SizedBox(width: 10),
               Expanded(
                 child: _ReportMetric(
-                  label: copy.isIndonesian ? 'Gap Tersisa' : 'Remaining Gaps',
+                  label: copy.remainingGapsLabel2,
                   value: '${remaining.count}',
-                  delta: _deltaLabel(remaining.weeklyDelta, copy.isIndonesian),
+                  delta: _deltaLabel(remaining.weeklyDelta, copy),
                 ),
               ),
             ],
           ),
           const SizedBox(height: 10),
           Text(
-            copy.isIndonesian
-                ? 'Akurasi jawaban = persentase jawaban benar pada rentang tanggal terpilih.'
-                : 'Answer accuracy = percentage of correct answers in the selected date range.',
+            copy.answerAccuracyPercentageCorrectAnswersLabel,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: WicaraColors.muted,
               fontWeight: FontWeight.w600,
@@ -8699,7 +8678,7 @@ class _WeeklyTimelinePanel extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            copy.isIndonesian ? 'Perkembangan 4 Minggu' : '4-Week Progress',
+            copy.weekProgressLabel,
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
               fontSize: 16,
               fontWeight: FontWeight.w700,
@@ -8707,9 +8686,7 @@ class _WeeklyTimelinePanel extends StatelessWidget {
           ),
           const SizedBox(height: 5),
           Text(
-            copy.isIndonesian
-                ? 'Lihat akurasi, jumlah jawaban, dan pergerakan gap tiap minggu.'
-                : 'Track accuracy, attempt volume, and gap movement per week.',
+            copy.trackAccuracyAttemptVolumeGapLabel,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: WicaraColors.muted,
               fontWeight: FontWeight.w600,
@@ -8782,9 +8759,7 @@ class _TimelineWeekRow extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            copy.isIndonesian
-                ? '${point.attemptCount} jawaban • ${point.fixedGaps} gap tertutup • ${point.remainingGaps} gap tersisa'
-                : '${point.attemptCount} attempts • ${point.fixedGaps} fixed gaps • ${point.remainingGaps} remaining gaps',
+            copy.weeklyPointSummaryLabel(point.attemptCount, point.fixedGaps, point.remainingGaps),
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: WicaraColors.muted,
               fontSize: 11,
@@ -8814,7 +8789,7 @@ class _EffortImpactPanel extends StatelessWidget {
           Row(
             children: [
               Text(
-                copy.isIndonesian ? 'Usaha vs Dampak' : 'Effort vs impact',
+                copy.effortVsImpactLabel,
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
                   fontSize: 16,
                   fontWeight: FontWeight.w700,
@@ -8824,7 +8799,7 @@ class _EffortImpactPanel extends StatelessWidget {
               _SoftBadge(
                 _efficiencyLabel(
                   effort.efficiencyLabel,
-                  isIndonesian: copy.isIndonesian,
+                  copy: copy,
                 ),
               ),
             ],
@@ -8834,21 +8809,21 @@ class _EffortImpactPanel extends StatelessWidget {
             children: [
               Expanded(
                 child: _LearningGainMetric(
-                  label: copy.isIndonesian ? 'Jawaban' : 'Attempts',
+                  label: copy.attemptsLabel,
                   value: '${effort.attemptCount}',
                 ),
               ),
               const SizedBox(width: 10),
               Expanded(
                 child: _LearningGainMetric(
-                  label: copy.isIndonesian ? 'Hari aktif' : 'Active days',
+                  label: copy.activeDaysLabel,
                   value: '${effort.activeDays}',
                 ),
               ),
               const SizedBox(width: 10),
               Expanded(
                 child: _LearningGainMetric(
-                  label: copy.isIndonesian ? 'Dampak' : 'Impact',
+                  label: copy.impactLabel,
                   value: _signedPercent(effort.impactScoreDelta),
                 ),
               ),
@@ -8894,9 +8869,7 @@ class _ConceptMoversPanel extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            copy.isIndonesian
-                ? 'Konsep Kuat vs Perlu Diperbaiki'
-                : 'Strong Concepts vs Needs Improvement',
+            copy.strongConceptsVsNeedsImprovementLabel,
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
               fontSize: 16,
               fontWeight: FontWeight.w700,
@@ -8904,9 +8877,7 @@ class _ConceptMoversPanel extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            copy.isIndonesian
-                ? 'Fokus pada konsep yang naik paling besar dan yang masih rawan.'
-                : 'Focus on concepts with the biggest lift and the ones still at risk.',
+            copy.focusConceptsBiggestLiftOnesLabel,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: WicaraColors.muted,
               fontWeight: FontWeight.w600,
@@ -8914,9 +8885,7 @@ class _ConceptMoversPanel extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            copy.isIndonesian
-                ? 'Angka di kanan menunjukkan perubahan mastery konsep (%) pada rentang ini.'
-                : 'The number on the right shows concept mastery change (%) in this range.',
+            copy.numberRightShowsConceptMasteryLabel,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: WicaraColors.muted,
               fontSize: 11,
@@ -8925,15 +8894,13 @@ class _ConceptMoversPanel extends StatelessWidget {
           ),
           const SizedBox(height: 14),
           _SubSectionTitle(
-            label: copy.isIndonesian ? 'Yang Sudah Kuat' : 'Now Strong',
+            label: copy.nowStrongLabel,
             color: WicaraColors.accentMint,
           ),
           const SizedBox(height: 8),
           if (strong.isEmpty)
             _SimplePlaceholder(
-              text: copy.isIndonesian
-                  ? 'Belum ada konsep yang naik signifikan minggu ini.'
-                  : 'No concepts showed significant improvement this week.',
+              text: copy.noConceptsShowedSignificantImprovementLabel,
             )
           else
             for (final mover in strong) ...[
@@ -8942,17 +8909,13 @@ class _ConceptMoversPanel extends StatelessWidget {
             ],
           const SizedBox(height: 14),
           _SubSectionTitle(
-            label: copy.isIndonesian
-                ? 'Yang Perlu Diperbaiki'
-                : 'Needs Improvement',
+            label: copy.needsImprovementLabel,
             color: WicaraColors.accentAmber,
           ),
           const SizedBox(height: 8),
           if (needs.isEmpty)
             _SimplePlaceholder(
-              text: copy.isIndonesian
-                  ? 'Tidak ada konsep rawan pada rentang ini.'
-                  : 'No at-risk concepts in this range.',
+              text: copy.noRiskConceptsRangeLabel,
             )
           else
             for (final mover in needs) ...[
@@ -9071,7 +9034,7 @@ class _WeeklyNarrativePanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final copy = _HomeCopyScope.of(context);
-    final locale = copy.isIndonesian ? 'id-ID' : 'en-US';
+    final locale = copy.speechLocale;
     final speechText = <String>[
       narrative.improved,
       narrative.stagnant,
@@ -9083,7 +9046,7 @@ class _WeeklyNarrativePanel extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            'Weekly narrative',
+            copy.weeklyNarrativeLabel,
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
               fontSize: 16,
               fontWeight: FontWeight.w700,
@@ -9092,11 +9055,11 @@ class _WeeklyNarrativePanel extends StatelessWidget {
           const SizedBox(height: 8),
           ReadAloudButton(textToRead: speechText, locale: locale),
           const SizedBox(height: 12),
-          _NarrativeRow(label: 'Improved', text: narrative.improved),
+          _NarrativeRow(label: copy.improvedLabel, text: narrative.improved),
           const SizedBox(height: 8),
-          _NarrativeRow(label: 'Stagnant', text: narrative.stagnant),
+          _NarrativeRow(label: copy.stagnantLabel, text: narrative.stagnant),
           const SizedBox(height: 8),
-          _NarrativeRow(label: 'Focus', text: narrative.focus),
+          _NarrativeRow(label: copy.focusLabel, text: narrative.focus),
         ],
       ),
     );
@@ -9161,7 +9124,7 @@ class _DateRangePill extends StatelessWidget {
           PopupMenuItem(
             value: option,
             child: Text(
-              _reportRangeOptionLabel(option, isIndonesian: copy.isIndonesian),
+              _reportRangeOptionLabel(option, copy: copy),
             ),
           ),
       ],
@@ -9230,13 +9193,13 @@ _ReportDateRange _reportRangeFor(_ReportRangeOption option, DateTime now) {
 
 String _reportRangeOptionLabel(
   _ReportRangeOption option, {
-  required bool isIndonesian,
+  required OnboardingCopy copy,
 }) {
   return switch (option) {
-    _ReportRangeOption.thisWeek => isIndonesian ? 'Minggu ini' : 'This week',
-    _ReportRangeOption.lastWeek => isIndonesian ? 'Minggu lalu' : 'Last week',
+    _ReportRangeOption.thisWeek => copy.weekLabel2,
+    _ReportRangeOption.lastWeek => copy.lastWeekLabel,
     _ReportRangeOption.last4Weeks =>
-      isIndonesian ? '4 minggu terakhir' : 'Last 4 weeks',
+      copy.lastWeeksLabel,
   };
 }
 
@@ -9278,7 +9241,7 @@ class _LearningGainCard extends StatelessWidget {
               const SizedBox(width: 9),
               Expanded(
                 child: Text(
-                  copy.isIndonesian ? 'Rata-rata Nilai' : 'Average Score',
+                  copy.averageScoreLabel,
                   style: Theme.of(context).textTheme.titleMedium?.copyWith(
                     fontSize: 16,
                     fontWeight: FontWeight.w700,
@@ -9290,9 +9253,7 @@ class _LearningGainCard extends StatelessWidget {
           const SizedBox(height: 14),
           if (!hasPairedEvidence)
             Text(
-              copy.isIndonesian
-                  ? 'Belum cukup data pre-test dan post-test pada konsep yang sama.'
-                  : 'Not enough matched pre-test and post-test data yet.',
+              copy.notEnoughMatchedPreTestLabel,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: WicaraColors.muted,
                 fontWeight: FontWeight.w600,
@@ -9304,21 +9265,21 @@ class _LearningGainCard extends StatelessWidget {
               children: [
                 Expanded(
                   child: _LearningGainMetric(
-                    label: 'Pre-test',
+                    label: copy.preTestLabel,
                     value: '${report.pretestScorePercent ?? 0}%',
                   ),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: _LearningGainMetric(
-                    label: 'Post-test',
+                    label: copy.postTestLabel,
                     value: '${report.posttestScorePercent ?? 0}%',
                   ),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: _LearningGainMetric(
-                    label: copy.isIndonesian ? 'Perubahan' : 'Change',
+                    label: copy.changeLabel,
                     value: _signedPercent(report.learningGainPercent ?? 0),
                   ),
                 ),
@@ -9371,83 +9332,71 @@ class _LearningGainMetric extends StatelessWidget {
   }
 }
 
-String _reportErrorMessage(Object? error, {required bool isIndonesian}) {
+String _reportErrorMessage(Object? error, {required OnboardingCopy copy}) {
   final raw = error?.toString().toLowerCase() ?? '';
   if (error is TimeoutException ||
       raw.contains('timeout') ||
       raw.contains('timed out') ||
       raw.contains('weekly_report_timeout')) {
-    return isIndonesian
-        ? 'Permintaan laporan melewati batas waktu. Coba lagi.'
-        : 'The report request timed out. Please try again.';
+    return copy.reportRequestTimedOutPleaseLabel;
   }
-  return isIndonesian
-      ? 'Laporan belum bisa dimuat. Coba lagi sebentar.'
-      : 'The report could not be loaded. Please try again.';
+  return copy.reportCouldNotLoadedPleaseLabel;
 }
 
 String _signedPercent(int value) => value > 0 ? '+$value%' : '$value%';
 
 String _signedPoint(int value) => value > 0 ? '+$value' : '$value';
 
-String _coverageStatusLabel(String value, {required bool isIndonesian}) {
+String _coverageStatusLabel(String value, {required OnboardingCopy copy}) {
   return switch (value) {
-    'evidence_backed' => isIndonesian ? 'Data Lengkap' : 'Complete Data',
-    'partial_history' => isIndonesian ? 'Data Sebagian' : 'Partial Data',
-    'seeded_baseline' => isIndonesian ? 'Data Awal' : 'Early Data',
+    'evidence_backed' => copy.completeDataLabel,
+    'partial_history' => copy.partialDataLabel,
+    'seeded_baseline' => copy.earlyDataLabel,
     _ => value.replaceAll('_', ' '),
   };
 }
 
-String _efficiencyLabel(String value, {required bool isIndonesian}) {
+String _efficiencyLabel(String value, {required OnboardingCopy copy}) {
   return switch (value) {
-    'high_leverage' => isIndonesian ? 'Efektif' : 'High leverage',
-    'steady' => isIndonesian ? 'Stabil' : 'Steady',
-    'needs_focus' => isIndonesian ? 'Perlu fokus' : 'Needs focus',
-    'no_signal' => isIndonesian ? 'Belum terbaca' : 'No signal',
+    'high_leverage' => copy.highLeverageLabel,
+    'steady' => copy.steadyLabel,
+    'needs_focus' => copy.needsFocusLabel,
+    'no_signal' => copy.noSignalLabel,
     _ => value.replaceAll('_', ' '),
   };
 }
 
-String _coverageStatusExplanation(String value, {required bool isIndonesian}) {
+String _coverageStatusExplanation(String value, {required OnboardingCopy copy}) {
   return switch (value) {
     'evidence_backed' =>
-      isIndonesian
-          ? 'Laporan disusun dari riwayat data yang sudah cukup lengkap.'
-          : 'This report is built from sufficiently complete history.',
+      copy.reportBuiltFromSufficientlyCompleteLabel,
     'partial_history' =>
-      isIndonesian
-          ? 'Data sudah ada, tapi histori pembanding belum penuh.'
-          : 'Data exists, but comparison history is still incomplete.',
+      copy.dataExistsButComparisonHistoryLabel,
     'seeded_baseline' =>
-      isIndonesian
-          ? 'Data masih tipis, jadi beberapa insight masih estimasi awal.'
-          : 'Data is still thin, so some insights are early estimates.',
+      copy.dataStillThinSoSomeLabel,
     _ =>
-      isIndonesian
-          ? 'Status kualitas data belum terdefinisi.'
-          : 'Data quality status is not defined yet.',
+      copy.dataQualityStatusNotDefinedLabel,
   };
 }
 
-String _performanceLabelId(String value, {required bool isIndonesian}) {
+String _performanceLabelId(String value, {required OnboardingCopy copy}) {
   final key = value.toLowerCase().trim();
   return switch (key) {
-    'overall' => isIndonesian ? 'Umum' : 'Overall',
-    'application' => isIndonesian ? 'Penerapan' : 'Application',
-    'analysis' => isIndonesian ? 'Penalaran' : 'Analysis',
+    'overall' => copy.overallLabel2,
+    'application' => copy.applicationLabel2,
+    'analysis' => copy.analysisLabel2,
     _ => value,
   };
 }
 
-String _deltaLabel(int value, bool isIndonesian) {
+String _deltaLabel(int value, OnboardingCopy copy) {
   if (value > 0) {
-    return isIndonesian ? '+$value minggu ini' : '+$value this week';
+    return copy.positiveDeltaThisWeekLabel(value);
   }
   if (value < 0) {
-    return isIndonesian ? '$value minggu ini' : '$value this week';
+    return copy.deltaThisWeekLabel(value);
   }
-  return isIndonesian ? '0 minggu ini' : '0 this week';
+  return copy.weekLabel3;
 }
 
 class _ReportPerformancePanel extends StatelessWidget {
@@ -9466,7 +9415,7 @@ class _ReportPerformancePanel extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-            copy.isIndonesian ? 'Performa Belajar' : 'Learning performance',
+            copy.learningPerformanceLabel,
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
               fontSize: 16,
               fontWeight: FontWeight.w700,
@@ -9474,7 +9423,7 @@ class _ReportPerformancePanel extends StatelessWidget {
           ),
           const SizedBox(height: 5),
           Text(
-            'Pre-test vs Post-test',
+            copy.preVsPostTestLabel,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
               color: WicaraColors.muted,
               fontWeight: FontWeight.w600,
@@ -9484,20 +9433,20 @@ class _ReportPerformancePanel extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const _ReportLegendDot(
-                label: 'Pre-test',
+              _ReportLegendDot(
+                label: copy.preTestLabel,
                 color: WicaraColors.primaryLight,
               ),
               const SizedBox(width: 18),
-              const _ReportLegendDot(
-                label: 'Post-test',
+              _ReportLegendDot(
+                label: copy.postTestLabel,
                 color: WicaraColors.secondary,
               ),
             ],
           ),
           const SizedBox(height: 20),
           if (groups.isEmpty)
-            _EmptyReportPerformanceState(isIndonesian: copy.isIndonesian)
+            _EmptyReportPerformanceState(copy: copy)
           else
             SizedBox(
               height: 144,
@@ -9522,9 +9471,9 @@ class _ReportPerformancePanel extends StatelessWidget {
 }
 
 class _EmptyReportPerformanceState extends StatelessWidget {
-  const _EmptyReportPerformanceState({required this.isIndonesian});
+  const _EmptyReportPerformanceState({required this.copy});
 
-  final bool isIndonesian;
+  final OnboardingCopy copy;
 
   @override
   Widget build(BuildContext context) {
@@ -9537,9 +9486,7 @@ class _EmptyReportPerformanceState extends StatelessWidget {
         border: Border.all(color: WicaraColors.line),
       ),
       child: Text(
-        isIndonesian
-            ? 'Belum ada attempt evaluasi pada rentang ini. Kerjakan evaluasi harian untuk mengisi grafik.'
-            : 'No assessment attempts in this range yet. Take a daily evaluation to build this graph.',
+        copy.noAssessmentAttemptsRangeYetLabel,
         textAlign: TextAlign.center,
         style: Theme.of(context).textTheme.bodySmall?.copyWith(
           color: WicaraColors.muted,
@@ -9680,12 +9627,13 @@ class _UpcomingRecommendationsPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final copy = _HomeCopyScope.of(context);
     final rows = recommendations.isEmpty
-        ? const [
+        ? [
             RecommendedNextAction(
-              title: 'Review due concepts',
+              title: copy.reviewDueConceptsLabel,
               actionType: 'review',
-              reason: 'Due this week',
+              reason: copy.dueThisWeekLabel,
             ),
           ]
         : recommendations;
@@ -10023,7 +9971,10 @@ class _KnowledgeMapDetailState extends State<_KnowledgeMapDetail> {
     _SubjectMapItem('biology', 'Biology', WicaraColors.biology, true),
   ];
 
-  _KnowledgeGraph _graph = _mathKnowledgeGraph;
+  OnboardingCopy get _copy =>
+      OnboardingCopy.forLanguage(widget.preferredLanguage);
+
+  late _KnowledgeGraph _graph;
   List<_SubjectMapItem> _subjects = _fallbackSubjects;
   String _selectedSubjectCode = 'math';
   int _visibleSectionCount = _initialVisibleSections;
@@ -10035,6 +9986,7 @@ class _KnowledgeMapDetailState extends State<_KnowledgeMapDetail> {
   @override
   void initState() {
     super.initState();
+    _graph = _localizedKnowledgeGraph(_mathKnowledgeGraph, _copy);
     _loadCurriculum();
   }
 
@@ -10069,9 +10021,9 @@ class _KnowledgeMapDetailState extends State<_KnowledgeMapDetail> {
       setState(() {
         _subjects = tabs;
         _selectedSubjectCode = selectedSubjectCode;
-        _graph = _knowledgeGraphFromApi(
-          graph,
-          focusSubjectCode: selectedSubjectCode,
+        _graph = _localizedKnowledgeGraph(
+          _knowledgeGraphFromApi(graph, focusSubjectCode: selectedSubjectCode),
+          _copy,
         );
         _visibleSectionCount = _initialVisibleSections;
         _selectedNode = null;
@@ -10083,7 +10035,7 @@ class _KnowledgeMapDetailState extends State<_KnowledgeMapDetail> {
       }
 
       setState(() {
-        _graph = _mathKnowledgeGraph;
+        _graph = _localizedKnowledgeGraph(_mathKnowledgeGraph, _copy);
         _subjects = _fallbackSubjects;
         _selectedSubjectCode = 'math';
         _visibleSectionCount = _initialVisibleSections;
@@ -10118,7 +10070,10 @@ class _KnowledgeMapDetailState extends State<_KnowledgeMapDetail> {
       }
 
       setState(() {
-        _graph = _knowledgeGraphFromApi(graph, focusSubjectCode: subject.code);
+        _graph = _localizedKnowledgeGraph(
+          _knowledgeGraphFromApi(graph, focusSubjectCode: subject.code),
+          _copy,
+        );
         _visibleSectionCount = _initialVisibleSections;
         _selectedNode = null;
         _isLoadingMoreSections = false;
@@ -10129,7 +10084,7 @@ class _KnowledgeMapDetailState extends State<_KnowledgeMapDetail> {
       }
 
       setState(() {
-        _graph = _mathKnowledgeGraph;
+        _graph = _localizedKnowledgeGraph(_mathKnowledgeGraph, _copy);
         _subjects = _fallbackSubjects;
         _selectedSubjectCode = 'math';
         _visibleSectionCount = _initialVisibleSections;
@@ -10230,9 +10185,7 @@ class _KnowledgeMapDetailState extends State<_KnowledgeMapDetail> {
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: Text(
-          copy.isIndonesian
-              ? 'Gunakan node ini sebagai goal?'
-              : 'Use this as your learning goal?',
+          copy.useAsLearningGoalLabel,
         ),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -10248,12 +10201,12 @@ class _KnowledgeMapDetailState extends State<_KnowledgeMapDetail> {
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(false),
             child: Text(
-              copy.isIndonesian ? 'Pilih node lain' : 'Choose another node',
+              copy.chooseAnotherNodeLabel,
             ),
           ),
           FilledButton(
             onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: Text(copy.isIndonesian ? 'Mulai pretest' : 'Start pretest'),
+            child: Text(copy.startPretestLabel),
           ),
         ],
       ),
@@ -10304,18 +10257,16 @@ class _KnowledgeMapDetailState extends State<_KnowledgeMapDetail> {
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: Text(
-          copy.isIndonesian ? 'Goal aktif ditemukan' : 'Active goal found',
+          copy.activeGoalFoundLabel,
         ),
         content: Text(
-          copy.isIndonesian
-              ? 'Kamu sudah punya goal aktif untuk "${conflict.existingTopic}". Kamu bisa lanjutkan goal itu atau kembali memilih node.'
-              : 'You already have an active goal for "${conflict.existingTopic}". You can continue that goal or go back to choose a node.',
+          copy.activeGoalConflictBodyLabel(conflict.existingTopic),
           style: const TextStyle(fontSize: 13, height: 1.35),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(),
-            child: Text(copy.isIndonesian ? 'Kembali' : 'Back'),
+            child: Text(copy.backLabel2),
           ),
           TextButton(
             onPressed: () {
@@ -10323,9 +10274,7 @@ class _KnowledgeMapDetailState extends State<_KnowledgeMapDetail> {
               _continueExistingGraphGoal(conflict);
             },
             child: Text(
-              copy.isIndonesian
-                  ? 'Lanjutkan goal ini'
-                  : 'Continue existing goal',
+              copy.continueExistingGoalLabel,
             ),
           ),
         ],
@@ -11605,7 +11554,7 @@ class _KnowledgeConceptDetailPanelState
     final crossSubject = widget.detail.crossSubjectConnections.isEmpty
         ? null
         : widget.detail.crossSubjectConnections.first;
-    final locale = copy.isIndonesian ? 'id-ID' : 'en-US';
+    final locale = copy.speechLocale;
     final detailSpeech = <String>[
       node.label,
       _nodeDescription(node, copy),
@@ -11741,9 +11690,7 @@ class _KnowledgeConceptDetailPanelState
               onPressed: widget.isLoading ? null : widget.onUseAsGoal,
               icon: const Icon(Icons.flag_outlined, size: 18),
               label: Text(
-                copy.isIndonesian
-                    ? 'Gunakan sebagai goal baru'
-                    : 'Use as new goal',
+                copy.useAsNewGoalLabel,
               ),
             ),
             const SizedBox(height: 16),
@@ -12016,10 +11963,7 @@ String _nodeDescription(_KnowledgeNode node, OnboardingCopy copy) {
   if (description != null && description.isNotEmpty) {
     return description;
   }
-  if (copy.isIndonesian) {
-    return 'Pelajari konsep ${node.label} dalam graf prasyarat.';
-  }
-  return 'Learn ${node.label} in the prerequisite graph.';
+  return copy.learnConceptInGraphLabel(node.label);
 }
 
 String? _conceptDescriptionForDisplay(String? value, OnboardingCopy copy) {
@@ -12275,6 +12219,19 @@ class _KnowledgeNode {
   final _NodeStatus status;
   final String? statusLabel;
 
+  _KnowledgeNode withLabel(String newLabel) => _KnowledgeNode(
+    id: id,
+    label: newLabel,
+    x: x,
+    y: y,
+    description: description,
+    idDesc: idDesc,
+    enDesc: enDesc,
+    gradeBand: gradeBand,
+    status: status,
+    statusLabel: statusLabel,
+  );
+
   double get width => 154;
   double get height => 116;
 
@@ -12344,6 +12301,35 @@ String _defaultSubjectCode(List<_SubjectMapItem> subjects) {
   }
 
   return subjects.firstWhere((subject) => !subject.isLocked).code;
+}
+
+/// Runs a graph's chrome (title, section labels, node labels) through the
+/// learner's copy. Backend-provided labels are already localized and pass
+/// through untouched; this only rescues the static fallback graph.
+_KnowledgeGraph _localizedKnowledgeGraph(
+  _KnowledgeGraph graph,
+  OnboardingCopy copy,
+) {
+  // English is the source language of the static graph, so nothing to map.
+  if (copy.languageCode == 'en') {
+    return graph;
+  }
+  return _KnowledgeGraph(
+    title: copy.knowledgeGraphLabel(graph.title),
+    width: graph.width,
+    height: graph.height,
+    topDown: graph.topDown,
+    groups: [
+      for (final group in graph.groups)
+        _MapGroup(label: copy.knowledgeGraphLabel(group.label), x: group.x),
+    ],
+    nodes: [
+      for (final node in graph.nodes)
+        node.withLabel(copy.knowledgeGraphLabel(node.label)),
+    ],
+    edges: graph.edges,
+    focusSubjectCode: graph.focusSubjectCode,
+  );
 }
 
 _KnowledgeGraph _knowledgeGraphFromApi(
@@ -12809,9 +12795,7 @@ class _KnowledgeMapOption extends StatelessWidget {
       iconColor: WicaraColors.primaryDeep,
       iconBackground: WicaraColors.speechBlue,
       title: copy.knowledgeMapLabel,
-      subtitle: copy.isIndonesian
-          ? 'Visualisasikan prasyarat, gap, dan konsep berikutnya.'
-          : 'Visualize prerequisites, gaps, and next concepts.',
+      subtitle: copy.visualizePrerequisitesGapsNextConceptsLabel,
       child: SizedBox(height: 164, child: _KnowledgeMapPreview()),
     );
   }
@@ -12942,7 +12926,7 @@ class _ReportBarGroup extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            _performanceLabelId(label, isIndonesian: copy.isIndonesian),
+            _performanceLabelId(label, copy: copy),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
             style: Theme.of(context).textTheme.bodySmall?.copyWith(

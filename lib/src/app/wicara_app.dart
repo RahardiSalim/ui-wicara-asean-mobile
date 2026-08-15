@@ -1,7 +1,11 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 
 import '../core/accessibility/speech_accessibility_scope.dart';
 import '../core/accessibility/speech_controller.dart';
+import '../core/localization/app_language.dart';
+import '../core/localization/wicara_copy_scope.dart';
 import '../core/theme/wicara_theme.dart';
 import '../features/auth/application/auth_controller.dart';
 import '../features/auth/presentation/sign_in_page.dart';
@@ -14,12 +18,14 @@ import '../features/landing/presentation/landing_page.dart';
 import '../features/learning_goal/domain/learning_goal_repository.dart';
 import '../features/learning_goal/presentation/learning_goal_page.dart';
 import '../features/onboarding/application/onboarding_controller.dart';
+import '../features/onboarding/domain/onboarding_copy.dart';
 import '../features/onboarding/domain/onboarding_repository.dart';
 import '../features/onboarding/presentation/onboarding_page.dart';
 import '../features/pretest/domain/pretest_repository.dart';
 import '../features/pretest/presentation/pretest_page.dart';
 import '../features/analytics/domain/analytics_models.dart';
 import '../features/review/domain/review_models.dart';
+import '../features/teacher_students/domain/teacher_student_models.dart';
 import '../features/workspace/domain/workspace_models.dart';
 import '../features/workspace/domain/workspace_repository.dart';
 import '../features/workspace/presentation/workspace_modules_page.dart';
@@ -37,6 +43,7 @@ class WicaraApp extends StatefulWidget {
     this.homeRepository,
     this.reviewRepository,
     this.analyticsRepository,
+    this.teacherStudentRepository,
     this.initialRoute = AppRoutes.landing,
     super.key,
   });
@@ -51,6 +58,7 @@ class WicaraApp extends StatefulWidget {
   final WorkspaceRepository? workspaceRepository;
   final ReviewRepository? reviewRepository;
   final AnalyticsRepository? analyticsRepository;
+  final TeacherStudentRepository? teacherStudentRepository;
   final String initialRoute;
 
   @override
@@ -88,6 +96,8 @@ class _WicaraAppState extends State<WicaraApp> with WidgetsBindingObserver {
       () => _speechController?.handleRouteChange(),
     );
     widget.authController.addListener(_onAuthChanged);
+    widget.onboardingController.addListener(_syncAppLanguage);
+    _syncAppLanguage();
     // If already initialized when the widget is created (uncommon but possible)
     if (widget.authController.isInitialized) {
       _resolvedInitialRoute = _computeInitialRoute();
@@ -98,7 +108,15 @@ class _WicaraAppState extends State<WicaraApp> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     widget.authController.removeListener(_onAuthChanged);
+    widget.onboardingController.removeListener(_syncAppLanguage);
     super.dispose();
+  }
+
+  /// Repositories, the HTTP client, and the offline pretest engine run outside
+  /// the widget tree, so they read the language from this mirror.
+  void _syncAppLanguage() {
+    AppLanguage.preferred =
+        widget.onboardingController.profile.preferredLanguage;
   }
 
   @override
@@ -156,13 +174,18 @@ class _WicaraAppState extends State<WicaraApp> with WidgetsBindingObserver {
     return AnimatedBuilder(
       animation: widget.onboardingController,
       builder: (context, _) {
-        return MaterialApp(
-          title: 'Wicara',
-          debugShowCheckedModeBanner: false,
-          theme: WicaraTheme.light(),
-          navigatorObservers: [_authRouteObserver, _speechRouteObserver],
-          initialRoute: initialRoute,
-          onGenerateRoute: _onGenerateRoute,
+        return WicaraCopyScope(
+          copy: OnboardingCopy.forLanguage(
+            widget.onboardingController.profile.preferredLanguage,
+          ),
+          child: MaterialApp(
+            title: 'Wicara',
+            debugShowCheckedModeBanner: false,
+            theme: WicaraTheme.light(),
+            navigatorObservers: [_authRouteObserver, _speechRouteObserver],
+            initialRoute: initialRoute,
+            onGenerateRoute: _onGenerateRoute,
+          ),
         );
       },
     );
@@ -204,6 +227,7 @@ class _WicaraAppState extends State<WicaraApp> with WidgetsBindingObserver {
           onboardingController: widget.onboardingController,
           reviewRepository: widget.reviewRepository,
           analyticsRepository: widget.analyticsRepository,
+          teacherStudentRepository: widget.teacherStudentRepository,
           routeArguments: settings.arguments,
         ),
         AppRoutes.workspaceModules => WorkspaceModulesPage(
@@ -272,7 +296,50 @@ class _UnavailableWorkspaceRepository implements WorkspaceRepository {
   Future<List<WorkspaceSessionSummary>> fetchSessionHistory({
     required String trackId,
     required String moduleId,
+    int limit = 20,
+    int offset = 0,
   }) {
+    throw UnimplementedError('WorkspaceRepository is not configured.');
+  }
+
+  @override
+  Future<void> deleteSession({
+    required String trackId,
+    required String moduleId,
+    required String workspaceId,
+  }) {
+    throw UnimplementedError('WorkspaceRepository is not configured.');
+  }
+
+  @override
+  Future<String> uploadCanvasImage({
+    required Uint8List bytes,
+    String filename = 'canvas.png',
+    String mimeType = 'image/png',
+  }) {
+    throw UnimplementedError('WorkspaceRepository is not configured.');
+  }
+
+  @override
+  String imageAssetUrl(String imageAssetId) {
+    throw UnimplementedError('WorkspaceRepository is not configured.');
+  }
+
+  @override
+  Map<String, String> imageAssetHeaders() {
+    throw UnimplementedError('WorkspaceRepository is not configured.');
+  }
+
+  @override
+  Future<void> clearCachedSession({
+    required String trackId,
+    required String moduleId,
+  }) {
+    throw UnimplementedError('WorkspaceRepository is not configured.');
+  }
+
+  @override
+  Future<void> clearLocalSessions() {
     throw UnimplementedError('WorkspaceRepository is not configured.');
   }
 
@@ -287,6 +354,7 @@ class _UnavailableWorkspaceRepository implements WorkspaceRepository {
     required String eventType,
     String textPayload = '',
     Map<String, dynamic> metadata = const {},
+    String? imageAssetId,
   }) {
     throw UnimplementedError('WorkspaceRepository is not configured.');
   }
@@ -436,6 +504,11 @@ class _UnavailableHomeRepository implements HomeRepository {
     String? trackId,
     String? moduleId,
   }) {
+    throw UnimplementedError('HomeRepository is not configured.');
+  }
+
+  @override
+  Future<DailyEvaluationSession> fetchPosttest({required String sessionId}) {
     throw UnimplementedError('HomeRepository is not configured.');
   }
 
