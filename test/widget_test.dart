@@ -1273,6 +1273,7 @@ class _FakeWorkspaceRepository implements WorkspaceRepository {
   Future<String> uploadCanvasImage({
     required Uint8List bytes,
     String filename = 'canvas.png',
+    String mimeType = 'image/png',
   }) async => 'image-asset-1';
 
   @override

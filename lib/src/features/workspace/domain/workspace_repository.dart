@@ -37,7 +37,8 @@ abstract class WorkspaceRepository {
   /// Uploads a canvas snapshot and returns the resulting image asset id.
   Future<String> uploadCanvasImage({
     required Uint8List bytes,
-    String filename,
+    String filename = 'canvas.png',
+    String mimeType = 'image/png',
   });
 
   /// URL for rendering a previously uploaded image asset. The endpoint is

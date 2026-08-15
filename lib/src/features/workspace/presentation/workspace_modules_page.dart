@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
@@ -80,6 +82,12 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
   bool _stopPosttestPolling = false;
   String? _activePosttestPollingWorkspaceId;
   String? _declinedPhaseTransition;
+  Uint8List? _pendingAttachmentBytes;
+  String? _pendingAttachmentAssetId;
+  String? _pendingAttachmentName;
+  String? _pendingAttachmentMimeType;
+  CanvasWorkSnapshot? _pendingCanvasSnapshot;
+  bool _isUploadingAttachment = false;
 
   /// Latest weekly report fetched from HomeRepository. Null while loading or
   /// if no HomeRepository was provided.
@@ -812,57 +820,117 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
   }
 
   Future<void> _handleCanvasSentToChat(CanvasWorkSnapshot snapshot) async {
-    setState(() {
-      _canvasSnapshots.add(snapshot);
-      _chatEntries.add(_WorkspaceChatEntry.canvas(snapshot));
-    });
-    _scrollToBottom();
-
-    // Upload the drawing itself, not just a description of it: without the
-    // image the tutor is answering blind about work it cannot see.
+    if (_isAppendingEvent || _isUploadingAttachment) return;
     String? imageAssetId;
+    Uint8List? imageBytes;
     try {
-      final png = await renderCanvasSnapshotPng(
+      imageBytes = await renderCanvasSnapshotPng(
         snapshot,
         copy: OnboardingCopy.forLanguage(
           widget.onboardingController.profile.preferredLanguage,
         ),
       );
-      if (png != null) {
+      if (imageBytes != null) {
+        setState(() => _isUploadingAttachment = true);
         imageAssetId = await widget.workspaceRepository.uploadCanvasImage(
-          bytes: png,
+          bytes: imageBytes,
+          filename: 'canvas.png',
+          mimeType: 'image/png',
         );
       }
     } on WorkspaceException catch (error) {
       if (mounted) {
         setState(() {
+          _isUploadingAttachment = false;
           _workspaceError = _workspaceMaterial.canvasUploadFailedMessage(
             error.message,
           );
         });
       }
+      return;
+    } finally {
+      if (mounted) setState(() => _isUploadingAttachment = false);
     }
+    if (!mounted || imageAssetId == null || imageBytes == null) return;
+    setState(() {
+      _pendingAttachmentBytes = imageBytes;
+      _pendingAttachmentAssetId = imageAssetId;
+      _pendingAttachmentName = 'canvas.png';
+      _pendingAttachmentMimeType = 'image/png';
+      _pendingCanvasSnapshot = snapshot;
+      _workspaceError = null;
+    });
+  }
 
-    await _appendWorkspaceEvent(
-      eventType: 'canvas_sent',
-      imageAssetId: imageAssetId,
-      metadata: {
-        'version': snapshot.version,
-        'element_count': snapshot.elementCount,
-        'has_attachment': snapshot.hasAttachment,
-        'show_grid': snapshot.showGrid,
-        'canvas_width': snapshot.canvasSize.width,
-        'canvas_height': snapshot.canvasSize.height,
-        'image_uploaded': imageAssetId != null,
-      },
+  Future<void> _pickWorkspaceImage() async {
+    if (_isAppendingEvent || _isUploadingAttachment) return;
+    final result = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: const ['jpg', 'jpeg', 'png', 'webp'],
+      withData: true,
     );
-    _scrollToBottom();
+    if (!mounted || result == null || result.files.isEmpty) return;
+    final file = result.files.single;
+    final bytes = file.bytes;
+    if (bytes == null || bytes.isEmpty) {
+      setState(
+        () => _workspaceError = _workspaceMaterial.imageUnreadableMessage,
+      );
+      return;
+    }
+    if (bytes.length > 10 * 1024 * 1024) {
+      setState(() => _workspaceError = _workspaceMaterial.imageTooLargeMessage);
+      return;
+    }
+    final mimeType = _workspaceImageMimeType(file.extension);
+    setState(() => _isUploadingAttachment = true);
+    try {
+      final imageAssetId = await widget.workspaceRepository.uploadCanvasImage(
+        bytes: bytes,
+        filename: file.name,
+        mimeType: mimeType,
+      );
+      if (!mounted) return;
+      setState(() {
+        _pendingAttachmentBytes = bytes;
+        _pendingAttachmentAssetId = imageAssetId;
+        _pendingAttachmentName = file.name;
+        _pendingAttachmentMimeType = mimeType;
+        _pendingCanvasSnapshot = null;
+        _workspaceError = null;
+      });
+    } on WorkspaceException catch (error) {
+      if (mounted) setState(() => _workspaceError = error.message);
+    } finally {
+      if (mounted) setState(() => _isUploadingAttachment = false);
+    }
+  }
+
+  void _removePendingAttachment() {
+    if (_isAppendingEvent || _isUploadingAttachment) return;
+    setState(() {
+      _pendingAttachmentBytes = null;
+      _pendingAttachmentAssetId = null;
+      _pendingAttachmentName = null;
+      _pendingAttachmentMimeType = null;
+      _pendingCanvasSnapshot = null;
+    });
+  }
+
+  static String _workspaceImageMimeType(String? extension) {
+    return switch (extension?.toLowerCase()) {
+      'jpg' || 'jpeg' => 'image/jpeg',
+      'webp' => 'image/webp',
+      _ => 'image/png',
+    };
   }
 
   Future<void> _sendMessage() async {
     final message = _messageController.text.trim();
-    if (message.isEmpty) return;
-    if (_isAppendingEvent) return;
+    final imageAssetId = _pendingAttachmentAssetId;
+    final canvasSnapshot = _pendingCanvasSnapshot;
+    if (message.isEmpty && imageAssetId == null) return;
+    if (_isAppendingEvent || _isUploadingAttachment) return;
     if (_isLoadingWorkspace || _workspace == null) {
       setState(() {
         _workspaceError = _workspaceMaterial.chatLoadingMessage;
@@ -874,7 +942,27 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     setState(() {
       _chatEntries.add(_WorkspaceChatEntry.text(text: message, isUser: true));
     });
-    await _appendWorkspaceEvent(eventType: 'text', textPayload: message);
+    if (canvasSnapshot != null) _canvasSnapshots.add(canvasSnapshot);
+    final sent = await _appendWorkspaceEvent(
+      eventType: canvasSnapshot == null ? 'text' : 'canvas_sent',
+      textPayload: message,
+      imageAssetId: imageAssetId,
+      metadata: {
+        if (canvasSnapshot != null) ...{
+          'version': canvasSnapshot.version,
+          'element_count': canvasSnapshot.elementCount,
+          'has_attachment': canvasSnapshot.hasAttachment,
+          'show_grid': canvasSnapshot.showGrid,
+          'canvas_width': canvasSnapshot.canvasSize.width,
+          'canvas_height': canvasSnapshot.canvasSize.height,
+        },
+        if (imageAssetId != null) 'attachment_name': _pendingAttachmentName,
+        if (_pendingAttachmentMimeType != null)
+          'attachment_mime_type': _pendingAttachmentMimeType,
+        'image_uploaded': imageAssetId != null,
+      },
+    );
+    if (sent && mounted) _removePendingAttachment();
     _scrollToBottom();
   }
 
@@ -971,7 +1059,9 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
           if (event.eventType == 'canvas_sent') {
             final count = event.metadata['element_count'];
             return _WorkspaceChatEntry.text(
-              text: material.canvasSnapshotSentLabel(count),
+              text: event.textPayload.trim().isEmpty
+                  ? material.canvasSnapshotSentLabel(count)
+                  : event.textPayload,
               isUser: true,
               imageUrl: imageUrl,
               timestamp: event.createdAt,
@@ -1325,6 +1415,12 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
                       phaseCheckpointQuestion: phaseCheckpointQuestion,
                       isSending: _isAppendingEvent,
                       isPhaseSubmitting: _isPhaseSubmitting,
+                      onOpenCanvas: _openCanvas,
+                      onAttachImage: _pickWorkspaceImage,
+                      onRemoveAttachment: _removePendingAttachment,
+                      pendingAttachmentBytes: _pendingAttachmentBytes,
+                      pendingAttachmentName: _pendingAttachmentName,
+                      isUploadingAttachment: _isUploadingAttachment,
                       copy: copy,
                       material: material,
                     ),
@@ -1352,18 +1448,6 @@ class _WorkspaceChatEntry {
     this.toolSuggestion,
   }) : snapshot = null,
        isSystemNote = false;
-
-  const _WorkspaceChatEntry.canvas(this.snapshot)
-    : text = null,
-      isUser = true,
-      nextActions = const [],
-      evidenceRequest = null,
-      explanationCard = null,
-      imageUrl = null,
-      isDegraded = false,
-      isSystemNote = false,
-      timestamp = null,
-      toolSuggestion = null;
 
   /// A non-conversational marker in the transcript, e.g. "a video was requested
   /// here". Rendered centred and muted rather than as a chat bubble.
@@ -1798,6 +1882,18 @@ class _LocalizedWorkspaceMaterial {
     en: 'Canvas image upload failed, the tutor only received text: $message',
     id: 'Gambar kanvas gagal diunggah, tutor hanya menerima teks: $message',
     args: [message],
+  );
+
+  String get imageUnreadableMessage => _t(
+    'imageUnreadableMessage',
+    en: 'The image file could not be read.',
+    id: 'File gambar tidak dapat dibaca.',
+  );
+
+  String get imageTooLargeMessage => _t(
+    'imageTooLargeMessage',
+    en: 'The image must be 10 MB or smaller.',
+    id: 'Ukuran gambar maksimal 10 MB.',
   );
 
   String get resumingVideoMessage => _t(
@@ -4184,6 +4280,12 @@ class _WorkspaceFooter extends StatelessWidget {
     required this.phaseCheckpointQuestion,
     required this.isSending,
     required this.isPhaseSubmitting,
+    required this.onOpenCanvas,
+    required this.onAttachImage,
+    required this.onRemoveAttachment,
+    required this.pendingAttachmentBytes,
+    required this.pendingAttachmentName,
+    required this.isUploadingAttachment,
     required this.copy,
     required this.material,
   });
@@ -4197,6 +4299,12 @@ class _WorkspaceFooter extends StatelessWidget {
   final String phaseCheckpointQuestion;
   final bool isSending;
   final bool isPhaseSubmitting;
+  final VoidCallback onOpenCanvas;
+  final VoidCallback onAttachImage;
+  final VoidCallback onRemoveAttachment;
+  final Uint8List? pendingAttachmentBytes;
+  final String? pendingAttachmentName;
+  final bool isUploadingAttachment;
   final OnboardingCopy copy;
   final _LocalizedWorkspaceMaterial material;
 
@@ -4298,6 +4406,12 @@ class _WorkspaceFooter extends StatelessWidget {
               controller: controller,
               onSend: onSend,
               isSending: isSending,
+              onOpenCanvas: onOpenCanvas,
+              onAttachImage: onAttachImage,
+              onRemoveAttachment: onRemoveAttachment,
+              pendingAttachmentBytes: pendingAttachmentBytes,
+              pendingAttachmentName: pendingAttachmentName,
+              isUploadingAttachment: isUploadingAttachment,
               copy: copy,
             ),
           ],
@@ -4312,6 +4426,12 @@ class _WorkspaceComposerInput extends StatelessWidget {
     required this.controller,
     required this.onSend,
     required this.isSending,
+    required this.onOpenCanvas,
+    required this.onAttachImage,
+    required this.onRemoveAttachment,
+    required this.pendingAttachmentBytes,
+    required this.pendingAttachmentName,
+    required this.isUploadingAttachment,
     required this.copy,
   });
 
@@ -4321,6 +4441,12 @@ class _WorkspaceComposerInput extends StatelessWidget {
   /// Blocks a second submit while one is in flight: two concurrent appends
   /// collide on the server's per-session event index.
   final bool isSending;
+  final VoidCallback onOpenCanvas;
+  final VoidCallback onAttachImage;
+  final VoidCallback onRemoveAttachment;
+  final Uint8List? pendingAttachmentBytes;
+  final String? pendingAttachmentName;
+  final bool isUploadingAttachment;
   final OnboardingCopy copy;
 
   @override
@@ -4328,8 +4454,70 @@ class _WorkspaceComposerInput extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (pendingAttachmentBytes != null) ...[
+          Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: WicaraColors.fieldFill,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: WicaraColors.secondaryLight),
+            ),
+            child: Row(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.memory(
+                    pendingAttachmentBytes!,
+                    height: 52,
+                    width: 68,
+                    fit: BoxFit.cover,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    pendingAttachmentName ?? copy.uploadWorkImageLabel,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Remove attachment',
+                  onPressed: isSending || isUploadingAttachment
+                      ? null
+                      : onRemoveAttachment,
+                  icon: const Icon(Icons.close_rounded),
+                ),
+              ],
+            ),
+          ),
+        ],
         Row(
           children: [
+            IconButton(
+              tooltip: copy.canvasLabel,
+              onPressed: isSending || isUploadingAttachment
+                  ? null
+                  : onOpenCanvas,
+              icon: const Icon(Icons.draw_rounded),
+            ),
+            IconButton(
+              tooltip: copy.uploadWorkImageLabel,
+              onPressed: isSending || isUploadingAttachment
+                  ? null
+                  : onAttachImage,
+              icon: isUploadingAttachment
+                  ? const SizedBox(
+                      height: 18,
+                      width: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.image_outlined),
+            ),
             Expanded(
               child: TextField(
                 controller: controller,

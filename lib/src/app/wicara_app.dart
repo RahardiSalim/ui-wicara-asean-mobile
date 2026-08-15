@@ -315,6 +315,7 @@ class _UnavailableWorkspaceRepository implements WorkspaceRepository {
   Future<String> uploadCanvasImage({
     required Uint8List bytes,
     String filename = 'canvas.png',
+    String mimeType = 'image/png',
   }) {
     throw UnimplementedError('WorkspaceRepository is not configured.');
   }

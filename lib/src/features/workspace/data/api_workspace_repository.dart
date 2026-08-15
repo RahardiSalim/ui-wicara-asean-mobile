@@ -152,6 +152,7 @@ class ApiWorkspaceRepository implements WorkspaceRepository {
   Future<String> uploadCanvasImage({
     required Uint8List bytes,
     String filename = 'canvas.png',
+    String mimeType = 'image/png',
   }) async {
     final token = _requireToken();
     try {
@@ -159,7 +160,7 @@ class ApiWorkspaceRepository implements WorkspaceRepository {
         '/api/v1/evidence/image-assets/upload',
         bytes: bytes,
         filename: filename,
-        mimeType: 'image/png',
+        mimeType: mimeType,
         headers: {'Authorization': 'Bearer $token'},
       );
       final assetId = _nullableString(json['id']);
