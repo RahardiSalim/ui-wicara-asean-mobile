@@ -465,8 +465,10 @@ class _AppHomePageState extends State<AppHomePage> {
     }
   }
 
-  void _resumePretest() {
-    Navigator.of(context).pushNamed(AppRoutes.pretest);
+  Future<void> _resumePretest() async {
+    await Navigator.of(context).pushNamed(AppRoutes.pretest);
+    if (!mounted) return;
+    _retryHomeSnapshot();
   }
 
   Future<void> _syncOnboardingProfileFromSnapshot(HomeSnapshot snapshot) async {
@@ -703,8 +705,10 @@ class _AppHomePageState extends State<AppHomePage> {
     setState(() => _showKnowledgeMap = false);
   }
 
-  void _openLearningGoal() {
-    Navigator.of(context).pushNamed(AppRoutes.learningGoal);
+  Future<void> _openLearningGoal() async {
+    await Navigator.of(context).pushNamed(AppRoutes.learningGoal);
+    if (!mounted) return;
+    _retryHomeSnapshot();
   }
 
   Future<void> _openWorkspaceModules(WorkspaceRouteArguments arguments) async {
