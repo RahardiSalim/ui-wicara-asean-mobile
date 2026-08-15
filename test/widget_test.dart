@@ -314,51 +314,44 @@ void main() {
     expect(find.text('Posttest Perkalian'), findsWidgets);
   });
 
-  testWidgets('workspace voice input is present and video stops speech', (
-    tester,
-  ) async {
-    tester.view.physicalSize = const Size(430, 932);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    addTearDown(tester.view.resetDevicePixelRatio);
-    final player = FakeAudioPlayer()..autoComplete = false;
-    final speechController = SpeechController(
-      apiClient: FakeSpeechApiClient(),
-      player: player,
-      recorder: FakeAudioRecorder(),
-    );
-    await speechController.init();
-    addTearDown(speechController.dispose);
+  testWidgets(
+    'workspace voice input is present and manual video trigger is hidden',
+    (tester) async {
+      tester.view.physicalSize = const Size(430, 932);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final player = FakeAudioPlayer()..autoComplete = false;
+      final speechController = SpeechController(
+        apiClient: FakeSpeechApiClient(),
+        player: player,
+        recorder: FakeAudioRecorder(),
+      );
+      await speechController.init();
+      addTearDown(speechController.dispose);
 
-    await tester.pumpWidget(
-      await _buildSignedInTestApp(
-        homeRepository: const _WorkspaceReadyHomeRepository(),
-        workspaceRepository: const _ExploreWorkspaceRepository(),
-        educationLevel: 'elementary',
-        gradeLevel: '4',
-        speechController: speechController,
-      ),
-    );
-    await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Continue session'));
-    await tester.tap(find.text('Continue session'));
-    await tester.pumpAndSettle();
+      await tester.pumpWidget(
+        await _buildSignedInTestApp(
+          homeRepository: const _WorkspaceReadyHomeRepository(),
+          workspaceRepository: const _ExploreWorkspaceRepository(),
+          educationLevel: 'elementary',
+          gradeLevel: '4',
+          speechController: speechController,
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Continue session'));
+      await tester.tap(find.text('Continue session'));
+      await tester.pumpAndSettle();
 
-    expect(find.text('Voice input'), findsOneWidget);
-    unawaited(speechController.speak('Speech that must stop for video.'));
-    await tester.pump();
-    await tester.pump();
-    expect(speechController.mode, SpeechMode.speaking);
-
-    await tester.ensureVisible(find.text('Generate video from this chat'));
-    await tester.tap(find.text('Generate video from this chat'));
-    await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Play generated video'));
-    await tester.tap(find.text('Play generated video'));
-    await tester.pump();
-
-    expect(speechController.mode, SpeechMode.idle);
-  });
+      expect(find.text('Voice input'), findsOneWidget);
+      expect(find.text('Generate video from this chat'), findsNothing);
+      unawaited(speechController.speak('Speech that must stop for video.'));
+      await tester.pump();
+      await tester.pump();
+      expect(speechController.mode, SpeechMode.speaking);
+    },
+  );
 
   testWidgets('workspace hides posttest until backend marks it eligible', (
     tester,

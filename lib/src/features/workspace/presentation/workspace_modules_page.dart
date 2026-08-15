@@ -73,8 +73,6 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
   String? _videoStatusMessage;
   String? _videoErrorMessage;
   bool _isWorkspaceHeaderExpanded = false;
-  List<WorkspaceSessionSummary> _sessionHistory = const [];
-  String? _activeSessionId;
   int _workspaceRequestSerial = 0;
   WorkspaceTutorResponse? _lastTutorResponse;
   WorkspaceMasteryUpdate? _lastMasteryUpdate;
@@ -120,10 +118,7 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     super.dispose();
   }
 
-  Future<void> _loadWorkspace({
-    String? workspaceSessionId,
-    bool startNewSession = false,
-  }) async {
+  Future<void> _loadWorkspace() async {
     final requestSerial = ++_workspaceRequestSerial;
     final arguments = widget.routeArguments;
     if (arguments == null || !arguments.isValid) {
@@ -137,31 +132,24 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     setState(() {
       _isLoadingWorkspace = true;
       _workspaceError = null;
-      if (startNewSession || workspaceSessionId != null) {
-        _resetCurrentChatState(nextActiveSessionId: workspaceSessionId);
-      }
     });
     try {
       final storedHistory = widget.workspaceRepository.sessionHistory(
         trackId: arguments.trackId,
         moduleId: arguments.moduleId,
       );
-      final resolvedWorkspaceSessionId =
-          workspaceSessionId ??
-          (startNewSession ? null : storedHistory.activeWorkspaceId);
       WorkspaceSession workspace;
       try {
         workspace = await widget.workspaceRepository.createOrResumeWorkspace(
           trackId: arguments.trackId,
           moduleId: arguments.moduleId,
-          workspaceSessionId: resolvedWorkspaceSessionId,
-          startNewSession: startNewSession,
+          workspaceSessionId: storedHistory.activeWorkspaceId,
         );
       } on WorkspaceException {
         // A cached id can outlive the session it points at (or belong to a
         // previous account). Fall back to a fresh resume instead of dead-ending
         // the learner on an error they cannot clear from inside the app.
-        if (resolvedWorkspaceSessionId == null) {
+        if (storedHistory.activeWorkspaceId == null) {
           rethrow;
         }
         await widget.workspaceRepository.clearCachedSession(
@@ -178,24 +166,13 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
         moduleId: arguments.moduleId,
         status: 'active',
       );
-      var history = _sessionHistory;
-      try {
-        history = await widget.workspaceRepository.fetchSessionHistory(
-          trackId: arguments.trackId,
-          moduleId: arguments.moduleId,
-        );
-      } on WorkspaceException {
-        history = _sessionHistory;
-      }
       if (!mounted || requestSerial != _workspaceRequestSerial) return;
       setState(() {
         _workspace = workspace;
-        _activeSessionId = workspace.id;
         _chatEntries
           ..clear()
           ..addAll(_entriesFromEvents(workspace.events));
         _restoreLoadedVideoState(workspace);
-        _sessionHistory = history;
         _isLoadingWorkspace = false;
       });
       _resumePendingVideoPolling(workspace);
@@ -208,163 +185,6 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
         _workspaceError = error.message;
       });
     }
-  }
-
-  Future<void> _startNewChatSession() async {
-    await _loadWorkspace(startNewSession: true);
-  }
-
-  Future<void> _switchToSession(String workspaceId) async {
-    final requestSerial = ++_workspaceRequestSerial;
-    final arguments = widget.routeArguments;
-    if (arguments == null || !arguments.isValid) {
-      return;
-    }
-    if (workspaceId == (_workspace?.id ?? '')) {
-      return;
-    }
-    setState(() {
-      _isLoadingWorkspace = true;
-      _workspaceError = null;
-      _resetCurrentChatState(nextActiveSessionId: workspaceId);
-    });
-    try {
-      final workspace = await widget.workspaceRepository.fetchWorkspace(
-        workspaceId,
-      );
-      await widget.workspaceRepository.setActiveSession(
-        trackId: arguments.trackId,
-        moduleId: arguments.moduleId,
-        workspaceId: workspaceId,
-      );
-      var history = _sessionHistory;
-      try {
-        history = await widget.workspaceRepository.fetchSessionHistory(
-          trackId: arguments.trackId,
-          moduleId: arguments.moduleId,
-        );
-      } on WorkspaceException {
-        history = _sessionHistory;
-      }
-      if (!mounted || requestSerial != _workspaceRequestSerial) {
-        return;
-      }
-      setState(() {
-        _workspace = workspace;
-        _activeSessionId = workspace.id;
-        _chatEntries
-          ..clear()
-          ..addAll(_entriesFromEvents(workspace.events));
-        _restoreLoadedVideoState(workspace);
-        _sessionHistory = history;
-        _isLoadingWorkspace = false;
-      });
-      _resumePendingVideoPolling(workspace);
-      _resumePendingPosttestPolling(workspace);
-      _scrollToBottom();
-    } on WorkspaceException catch (error) {
-      if (!mounted || requestSerial != _workspaceRequestSerial) {
-        return;
-      }
-      setState(() {
-        _isLoadingWorkspace = false;
-        _workspaceError = error.message;
-      });
-    }
-  }
-
-  void _resetCurrentChatState({String? nextActiveSessionId}) {
-    _declinedPhaseTransition = null;
-    _workspace = null;
-    _activeSessionId = nextActiveSessionId;
-    _isAppendingEvent = false;
-    _isPhaseSubmitting = false;
-    _isVideoGenerating = false;
-    _stopVideoPolling = true;
-    _chatEntries.clear();
-    _canvasSnapshots.clear();
-    _contentMode = _WorkspaceContentMode.choosing;
-    _latestVideoStatus = null;
-    _latestVideoArtifact = null;
-    _videoStatusMessage = null;
-    _videoErrorMessage = null;
-    _lastTutorResponse = null;
-    _lastMasteryUpdate = null;
-    _activeVideoJobId = null;
-  }
-
-  Future<void> _openSessionHistorySheet() async {
-    final arguments = widget.routeArguments;
-    if (arguments == null || !arguments.isValid) {
-      return;
-    }
-    List<WorkspaceSessionSummary> sessions = _sessionHistory;
-    try {
-      sessions = await widget.workspaceRepository.fetchSessionHistory(
-        trackId: arguments.trackId,
-        moduleId: arguments.moduleId,
-      );
-      if (mounted) {
-        setState(() => _sessionHistory = sessions);
-      }
-    } on WorkspaceException catch (error) {
-      if (!mounted) {
-        return;
-      }
-      setState(() => _workspaceError = error.message);
-      return;
-    }
-    if (!mounted || sessions.isEmpty) {
-      return;
-    }
-    final selected = await showModalBottomSheet<String>(
-      context: context,
-      showDragHandle: true,
-      builder: (context) {
-        return _WorkspaceHistorySheet(
-          sessions: sessions,
-          activeSessionId: _activeSessionId,
-          material: _workspaceMaterial,
-          onDeleteSession: (id) => unawaited(_deleteSession(id)),
-        );
-      },
-    );
-    if (selected != null) {
-      await _switchToSession(selected);
-    }
-  }
-
-  Future<void> _deleteSession(String workspaceId) async {
-    final arguments = widget.routeArguments;
-    if (arguments == null || !arguments.isValid) {
-      return;
-    }
-    try {
-      await widget.workspaceRepository.deleteSession(
-        trackId: arguments.trackId,
-        moduleId: arguments.moduleId,
-        workspaceId: workspaceId,
-      );
-    } on WorkspaceException catch (error) {
-      if (mounted) {
-        setState(() => _workspaceError = error.message);
-      }
-      return;
-    }
-    if (!mounted) {
-      return;
-    }
-    // Deleting the session you are sitting in has to re-resolve which session
-    // to show; deleting any other one only prunes the list.
-    if (workspaceId == _workspace?.id) {
-      await _loadWorkspace();
-      return;
-    }
-    setState(() {
-      _sessionHistory = _sessionHistory
-          .where((session) => session.id != workspaceId)
-          .toList(growable: false);
-    });
   }
 
   Future<void> _generateVideo({WorkspaceToolSuggestion? suggestion}) async {
@@ -726,24 +546,8 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
       if (!mounted || _workspace?.id != workspace.id) {
         return;
       }
-      final arguments = widget.routeArguments;
-      var history = _sessionHistory;
-      if (arguments != null && arguments.isValid) {
-        try {
-          history = await widget.workspaceRepository.fetchSessionHistory(
-            trackId: arguments.trackId,
-            moduleId: arguments.moduleId,
-          );
-        } on WorkspaceException {
-          history = _sessionHistory;
-        }
-      }
-      if (!mounted || _workspace?.id != workspace.id) {
-        return;
-      }
       setState(() {
         _workspace = updated;
-        _sessionHistory = history;
         _isPhaseSubmitting = false;
         _declinedPhaseTransition = null;
       });
@@ -1129,22 +933,8 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
         imageAssetId: imageAssetId,
       );
       if (!mounted || _workspace?.id != workspace.id) return false;
-      final arguments = widget.routeArguments;
-      var history = _sessionHistory;
-      if (arguments != null && arguments.isValid) {
-        try {
-          history = await widget.workspaceRepository.fetchSessionHistory(
-            trackId: arguments.trackId,
-            moduleId: arguments.moduleId,
-          );
-        } on WorkspaceException {
-          history = _sessionHistory;
-        }
-      }
-      if (!mounted || _workspace?.id != workspace.id) return false;
       setState(() {
         _workspace = result.workspace;
-        _sessionHistory = history;
         _chatEntries
           ..clear()
           ..addAll(_entriesFromEvents(result.workspace.events));
@@ -1301,6 +1091,7 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
         : (_workspace == null
               ? material.loadingDescription
               : material.syncedDescription);
+    final showTopicOverview = _chatEntries.isEmpty;
     return Scaffold(
       backgroundColor: WicaraColors.pageBackground,
       body: SafeArea(
@@ -1394,15 +1185,17 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.stretch,
                                 children: [
-                                  _WorkspaceTopicCard(
-                                    copy: copy,
-                                    title:
-                                        _workspace?.currentTopic ??
-                                        widget.routeArguments?.moduleTitle ??
-                                        material.topicTitle,
-                                    description: workspaceDescription,
-                                  ),
-                                  const SizedBox(height: 10),
+                                  if (showTopicOverview) ...[
+                                    _WorkspaceTopicCard(
+                                      copy: copy,
+                                      title:
+                                          _workspace?.currentTopic ??
+                                          widget.routeArguments?.moduleTitle ??
+                                          material.topicTitle,
+                                      description: workspaceDescription,
+                                    ),
+                                    const SizedBox(height: 10),
+                                  ],
                                   _PhaseStepperBar(
                                     currentPhase:
                                         workspace?.currentPhase ?? 'engage',
@@ -1410,44 +1203,6 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
                                         workspace?.phaseTransitionPending ??
                                         false,
                                     material: material,
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Row(
-                                    children: [
-                                      Expanded(
-                                        child: OutlinedButton.icon(
-                                          onPressed: _isLoadingWorkspace
-                                              ? null
-                                              : () {
-                                                  unawaited(
-                                                    _startNewChatSession(),
-                                                  );
-                                                },
-                                          icon: const Icon(
-                                            Icons.add_comment_outlined,
-                                          ),
-                                          label: Text(material.newChatLabel),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Expanded(
-                                        child: OutlinedButton.icon(
-                                          onPressed: () {
-                                            unawaited(
-                                              _openSessionHistorySheet(),
-                                            );
-                                          },
-                                          icon: const Icon(
-                                            Icons.history_rounded,
-                                          ),
-                                          label: Text(
-                                            material.historyButtonLabel(
-                                              _sessionHistory.length,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ],
                                   ),
                                   if (showStartPosttestButton) ...[
                                     const SizedBox(height: 8),
@@ -1565,16 +1320,11 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
                         unawaited(_advancePhase());
                       },
                       onStayInPhase: _stayInCurrentPhase,
-                      onGenerateVideo: () {
-                        unawaited(_generateVideo());
-                      },
                       showPhaseCheckpoint: showPhaseCheckpoint,
                       currentPhase: workspace?.currentPhase ?? 'engage',
                       phaseCheckpointQuestion: phaseCheckpointQuestion,
                       isSending: _isAppendingEvent,
                       isPhaseSubmitting: _isPhaseSubmitting,
-                      isVideoGenerating: _isVideoGenerating,
-                      canGenerateVideo: _canGenerateVideoForCurrentTopic(),
                       copy: copy,
                       material: material,
                     ),
@@ -1646,144 +1396,6 @@ class _WorkspaceChatEntry {
       (evidenceRequest?.isNotEmpty ?? false) ||
       (explanationCard?.isNotEmpty ?? false) ||
       toolSuggestion != null;
-}
-
-class _WorkspaceHistorySheet extends StatelessWidget {
-  const _WorkspaceHistorySheet({
-    required this.sessions,
-    required this.activeSessionId,
-    required this.material,
-    required this.onDeleteSession,
-  });
-
-  final List<WorkspaceSessionSummary> sessions;
-  final String? activeSessionId;
-  final _LocalizedWorkspaceMaterial material;
-  final ValueChanged<String> onDeleteSession;
-
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxHeight: 520),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 4, 20, 10),
-              child: Text(
-                material.chatHistoryTitle,
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: WicaraColors.ink,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
-            Flexible(
-              child: ListView.separated(
-                shrinkWrap: true,
-                itemCount: sessions.length,
-                separatorBuilder: (_, _) => const Divider(height: 1),
-                itemBuilder: (context, index) {
-                  final session = sessions[index];
-                  final isActive = session.id == activeSessionId;
-                  return ListTile(
-                    leading: Icon(
-                      isActive
-                          ? Icons.chat_bubble_rounded
-                          : Icons.chat_bubble_outline_rounded,
-                      color: isActive
-                          ? WicaraColors.primary
-                          : WicaraColors.muted,
-                    ),
-                    title: Text(
-                      material.historySessionTitle(session.title),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w800),
-                    ),
-                    subtitle: Text(
-                      _historySubtitle(session),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.delete_outline_rounded),
-                          tooltip: material.deleteSessionLabel,
-                          onPressed: () async {
-                            final confirmed = await showDialog<bool>(
-                              context: context,
-                              builder: (dialogContext) => AlertDialog(
-                                title: Text(material.deleteSessionLabel),
-                                content: Text(
-                                  material.deleteSessionConfirmBody,
-                                ),
-                                actions: [
-                                  TextButton(
-                                    onPressed: () =>
-                                        Navigator.of(dialogContext).pop(false),
-                                    child: Text(material.cancelLabel),
-                                  ),
-                                  FilledButton(
-                                    onPressed: () =>
-                                        Navigator.of(dialogContext).pop(true),
-                                    child: Text(material.deleteSessionLabel),
-                                  ),
-                                ],
-                              ),
-                            );
-                            if (confirmed == true && context.mounted) {
-                              Navigator.of(context).pop();
-                              onDeleteSession(session.id);
-                            }
-                          },
-                        ),
-                        Icon(
-                          isActive
-                              ? Icons.check_rounded
-                              : Icons.chevron_right_rounded,
-                        ),
-                      ],
-                    ),
-                    onTap: () => Navigator.of(context).pop(session.id),
-                  );
-                },
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  String _historySubtitle(WorkspaceSessionSummary session) {
-    final parts = <String>[];
-    if (session.preview.isNotEmpty) {
-      parts.add(session.preview);
-    }
-    final countLabel = material.historyMessageCountLabel(session.messageCount);
-    parts.add(countLabel);
-    final timeLabel = _compactDate(session.updatedAt);
-    if (timeLabel.isNotEmpty) {
-      parts.add(timeLabel);
-    }
-    return parts.join(' | ');
-  }
-
-  String _compactDate(String value) {
-    final parsed = DateTime.tryParse(value);
-    if (parsed == null) {
-      return '';
-    }
-    final local = parsed.toLocal();
-    final hour = local.hour.toString().padLeft(2, '0');
-    final minute = local.minute.toString().padLeft(2, '0');
-    return '${local.day}/${local.month} $hour:$minute';
-  }
 }
 
 class _LocalizedWorkspaceMaterial {
@@ -4567,14 +4179,11 @@ class _WorkspaceFooter extends StatelessWidget {
     required this.onSend,
     required this.onConfirmPhase,
     required this.onStayInPhase,
-    required this.onGenerateVideo,
     required this.showPhaseCheckpoint,
     required this.currentPhase,
     required this.phaseCheckpointQuestion,
     required this.isSending,
     required this.isPhaseSubmitting,
-    required this.isVideoGenerating,
-    required this.canGenerateVideo,
     required this.copy,
     required this.material,
   });
@@ -4583,14 +4192,11 @@ class _WorkspaceFooter extends StatelessWidget {
   final VoidCallback onSend;
   final VoidCallback onConfirmPhase;
   final VoidCallback onStayInPhase;
-  final VoidCallback onGenerateVideo;
   final bool showPhaseCheckpoint;
   final String currentPhase;
   final String phaseCheckpointQuestion;
   final bool isSending;
   final bool isPhaseSubmitting;
-  final bool isVideoGenerating;
-  final bool canGenerateVideo;
   final OnboardingCopy copy;
   final _LocalizedWorkspaceMaterial material;
 
@@ -4688,30 +4294,6 @@ class _WorkspaceFooter extends StatelessWidget {
                       key: ValueKey('automatic-phase-idle'),
                     ),
             ),
-            if (canGenerateVideo || isVideoGenerating) ...[
-              FilledButton.icon(
-                onPressed: !isVideoGenerating && canGenerateVideo
-                    ? onGenerateVideo
-                    : null,
-                icon: Icon(
-                  isVideoGenerating
-                      ? Icons.hourglass_bottom_rounded
-                      : Icons.smart_display_rounded,
-                ),
-                label: Text(
-                  isVideoGenerating
-                      ? material.generatingVideoButtonLabel
-                      : material.generateVideoFromChatLabel,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                style: FilledButton.styleFrom(
-                  minimumSize: const Size.fromHeight(44),
-                  padding: const EdgeInsets.symmetric(horizontal: 10),
-                ),
-              ),
-              const SizedBox(height: 8),
-            ],
             _WorkspaceComposerInput(
               controller: controller,
               onSend: onSend,
