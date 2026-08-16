@@ -33,6 +33,8 @@ abstract class HomeRepository {
     String? moduleId,
   });
 
+  Future<DailyEvaluationSession> fetchPosttest({required String sessionId});
+
   Future<DailyEvaluationAnswerResult> submitPosttestAnswer({
     required String sessionId,
     required String questionId,

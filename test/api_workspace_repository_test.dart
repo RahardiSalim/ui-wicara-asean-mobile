@@ -33,6 +33,8 @@ void main() {
               'next_actions': ['buat_visualisasi', 'minta_petunjuk'],
               'next_phase_ready': false,
               'phase_reasoning': 'More evidence is required.',
+              'phase_checkpoint_question':
+                  'After comparing the two derivative steps, are you sure why the inner derivative is still needed?',
               'evidence_tags': ['identified_outer_function'],
               'correctness': 'partial',
               'misconception_status': 'still_active',
@@ -41,6 +43,11 @@ void main() {
               'scaffold_level': 2,
               'evidence_request': {'type': 'short_answer'},
               'explanation_card': {'title': 'Chain rule'},
+              'tool_suggestion': {
+                'tool': 'visualization',
+                'reason': 'learner_stuck',
+                'prompt': 'Show how the inner derivative changes the slope.',
+              },
             },
             'mastery_update': null,
             'workspace': _workspaceJson(),
@@ -66,7 +73,16 @@ void main() {
         'minta_petunjuk',
       ]);
       expect(result.tutorResponse?.correctness, 'partial');
+      expect(
+        result.tutorResponse?.phaseCheckpointQuestion,
+        contains('why the inner derivative is still needed'),
+      );
       expect(result.tutorResponse?.evidenceRequest, {'type': 'short_answer'});
+      expect(result.tutorResponse?.toolSuggestion?.isVisualization, isTrue);
+      expect(
+        result.tutorResponse?.toolSuggestion?.prompt,
+        'Show how the inner derivative changes the slope.',
+      );
       expect(
         result.workspace.learningContext.currentModuleConceptId,
         'concept-chain-rule',
@@ -259,6 +275,28 @@ void main() {
       store.workspaceIdFor(trackId: 'track-1', moduleId: 'module-1'),
       isNull,
     );
+  });
+
+  test('workspace event exposes tutor tool and queued media metadata', () {
+    final tutorEvent = workspaceEventFromJson({
+      ..._eventJson(actorType: 'tutor', text: 'A visual may help.'),
+      'metadata': {
+        'tool_suggestion': {
+          'tool': 'visualization',
+          'reason': 'repeated_misconception',
+          'prompt': 'Compare the outer and inner derivative visually.',
+        },
+      },
+    });
+    final mediaEvent = workspaceEventFromJson({
+      ..._eventJson(actorType: 'system', text: ''),
+      'event_type': 'media_generated',
+      'metadata': {'job_id': 'job-1', 'queue_status': 'queued'},
+    });
+
+    expect(tutorEvent.tutorToolSuggestion?.isVisualization, isTrue);
+    expect(mediaEvent.mediaJobId, 'job-1');
+    expect(mediaEvent.mediaQueueStatus, 'queued');
   });
 }
 

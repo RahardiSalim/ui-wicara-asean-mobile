@@ -36,6 +36,9 @@ class AuthController extends ChangeNotifier {
     if (session == null) {
       return AppRoutes.landing;
     }
+    if (session.role == AuthRole.teacher) {
+      return AppRoutes.home;
+    }
     if (!session.onboardingCompleted) {
       return AppRoutes.onboarding;
     }
@@ -139,6 +142,10 @@ class AuthController extends ChangeNotifier {
     final session = await _authRepository.register(request);
     await _setSession(session, lastProtectedRoute: AppRoutes.onboarding);
     return session;
+  }
+
+  Future<void> requestPasswordReset(String email) {
+    return _authRepository.requestPasswordReset(email);
   }
 
   Future<AuthSession> startDevelopmentSession({

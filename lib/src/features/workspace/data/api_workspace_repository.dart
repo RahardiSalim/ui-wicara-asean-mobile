@@ -152,6 +152,7 @@ class ApiWorkspaceRepository implements WorkspaceRepository {
   Future<String> uploadCanvasImage({
     required Uint8List bytes,
     String filename = 'canvas.png',
+    String mimeType = 'image/png',
   }) async {
     final token = _requireToken();
     try {
@@ -159,7 +160,7 @@ class ApiWorkspaceRepository implements WorkspaceRepository {
         '/api/v1/evidence/image-assets/upload',
         bytes: bytes,
         filename: filename,
-        mimeType: 'image/png',
+        mimeType: mimeType,
         headers: {'Authorization': 'Bearer $token'},
       );
       final assetId = _nullableString(json['id']);
@@ -440,6 +441,9 @@ WorkspaceAppendResult appendResultFromJson(Map<String, dynamic> json) {
             ),
             nextPhaseReady: _bool(tutorResponse['next_phase_ready']),
             phaseReasoning: _nullableString(tutorResponse['phase_reasoning']),
+            phaseCheckpointQuestion: _nullableString(
+              tutorResponse['phase_checkpoint_question'],
+            ),
             evidenceTags: _stringList(tutorResponse['evidence_tags']),
             correctness: _string(tutorResponse['correctness']).isEmpty
                 ? 'unknown'
@@ -462,6 +466,12 @@ WorkspaceAppendResult appendResultFromJson(Map<String, dynamic> json) {
                 ? tutorResponse['explanation_card'] as Map<String, dynamic>
                 : null,
             degraded: _bool(tutorResponse['degraded']),
+            toolSuggestion:
+                tutorResponse['tool_suggestion'] is Map<String, dynamic>
+                ? WorkspaceToolSuggestion.fromMap(
+                    tutorResponse['tool_suggestion'] as Map<String, dynamic>,
+                  )
+                : null,
           )
         : null,
     masteryUpdate: masteryUpdate is Map<String, dynamic>

@@ -22,8 +22,7 @@ class AssessmentOptionTile extends StatelessWidget {
     final borderColor = isSelected ? WicaraColors.secondary : WicaraColors.line;
 
     return Semantics(
-      label:
-          '${option.label}. ${SpeechTextFormatter.format(option.text)}',
+      label: '${option.label}. ${SpeechTextFormatter.format(option.text)}',
       button: true,
       checked: isSelected,
       inMutuallyExclusiveGroup: true,
@@ -34,51 +33,53 @@ class AssessmentOptionTile extends StatelessWidget {
             onTap: onTap,
             borderRadius: BorderRadius.circular(14),
             child: AnimatedContainer(
-          duration: const Duration(milliseconds: 170),
-          constraints: const BoxConstraints(minHeight: 68),
-          padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 12),
-          decoration: BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: borderColor, width: isSelected ? 2 : 1.3),
-            boxShadow: [
-              if (isSelected)
-                BoxShadow(
-                  color: WicaraColors.secondary.withValues(alpha: 0.16),
-                  blurRadius: 12,
-                  offset: const Offset(0, 7),
+              duration: const Duration(milliseconds: 170),
+              constraints: const BoxConstraints(minHeight: 68),
+              padding: const EdgeInsets.symmetric(horizontal: 15, vertical: 12),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(
+                  color: borderColor,
+                  width: isSelected ? 2 : 1.3,
                 ),
-            ],
-          ),
-          child: Row(
-            children: [
-              _SelectionDot(isSelected: isSelected),
-              const SizedBox(width: 15),
-              SizedBox(
-                width: 17,
-                child: Text(
-                  option.label,
-                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                    color: WicaraColors.muted,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
+                boxShadow: [
+                  if (isSelected)
+                    BoxShadow(
+                      color: WicaraColors.secondary.withValues(alpha: 0.16),
+                      blurRadius: 12,
+                      offset: const Offset(0, 7),
+                    ),
+                ],
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: RichMathText(
-                  option.text,
-                  maxLines: 3,
-                  overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: WicaraColors.text,
-                    fontWeight: FontWeight.w400,
-                    height: 1.28,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _SelectionDot(isSelected: isSelected),
+                  const SizedBox(width: 15),
+                  SizedBox(
+                    width: 17,
+                    child: Text(
+                      option.label,
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        color: WicaraColors.muted,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
                   ),
-                ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: RichMathText(
+                      option.text,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: WicaraColors.text,
+                        fontWeight: FontWeight.w400,
+                        height: 1.28,
+                      ),
+                    ),
+                  ),
+                ],
               ),
-            ],
-          ),
             ),
           ),
         ),

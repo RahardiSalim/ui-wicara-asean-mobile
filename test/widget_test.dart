@@ -199,10 +199,11 @@ void main() {
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
 
+    final homeRepository = _RefreshingReadySessionHomeRepository();
     await tester.pumpWidget(
       await _buildSignedInTestApp(
-        homeRepository: const _WorkspaceReadyHomeRepository(),
-        workspaceRepository: const _FakeWorkspaceRepository(),
+        homeRepository: homeRepository,
+        workspaceRepository: const _EligibleWorkspaceRepository(),
         educationLevel: 'elementary',
         gradeLevel: '4',
       ),
@@ -215,11 +216,10 @@ void main() {
 
     expect(find.text('Long explanation'), findsNothing);
     expect(find.text('Sudden check'), findsNothing);
-    expect(find.text('Start learning chat'), findsOneWidget);
     expect(find.text('Check understanding'), findsNothing);
-
-    await tester.tap(find.text('Start learning chat'));
-    await tester.pumpAndSettle();
+    expect(find.text('Evidence requested'), findsNothing);
+    expect(find.text('micro_check'), findsNothing);
+    expect(find.text('expected_evidence'), findsNothing);
 
     await tester.ensureVisible(find.text('Start Posttest'));
     await tester.tap(find.text('Start Posttest'));
@@ -265,6 +265,7 @@ void main() {
     expect(find.text('Mastery confirmed'), findsOneWidget);
     expect(find.text('Perkalian'), findsWidgets);
     expect(find.text('100%'), findsWidgets);
+    expect(homeRepository.postFinalizeSnapshotRequested, isTrue);
 
     await tester.ensureVisible(find.text('Continue learning'));
     await tester.tap(find.text('Continue learning'));
@@ -275,51 +276,79 @@ void main() {
     expect(preferences.getString('auth.lastProtectedRoute'), '/home');
   });
 
-  testWidgets('workspace voice input is present and video stops speech', (
+  testWidgets('workspace polls asynchronous posttest generation until ready', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(430, 932);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
-    final player = FakeAudioPlayer()..autoComplete = false;
-    final speechController = SpeechController(
-      apiClient: FakeSpeechApiClient(),
-      player: player,
-      recorder: FakeAudioRecorder(),
-    );
-    await speechController.init();
-    addTearDown(speechController.dispose);
 
+    final repository = _AsyncPosttestWorkspaceRepository();
     await tester.pumpWidget(
       await _buildSignedInTestApp(
-        homeRepository: const _WorkspaceReadyHomeRepository(),
-        workspaceRepository: const _FakeWorkspaceRepository(),
+        homeRepository: const _ReadySessionOnlyHomeRepository(),
+        workspaceRepository: repository,
         educationLevel: 'elementary',
         gradeLevel: '4',
-        speechController: speechController,
       ),
     );
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Continue session'));
+
     await tester.tap(find.text('Continue session'));
     await tester.pumpAndSettle();
-
-    expect(find.text('Voice input'), findsOneWidget);
-    unawaited(speechController.speak('Speech that must stop for video.'));
-    await tester.pump();
-    await tester.pump();
-    expect(speechController.mode, SpeechMode.speaking);
-
-    await tester.ensureVisible(find.text('Generate video from this chat'));
-    await tester.tap(find.text('Generate video from this chat'));
+    await tester.ensureVisible(find.text('Start Posttest'));
+    await tester.tap(find.text('Start Posttest'));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Play generated video'));
-    await tester.tap(find.text('Play generated video'));
+    await tester.tap(find.text('Start posttest'));
     await tester.pump();
 
-    expect(speechController.mode, SpeechMode.idle);
+    expect(find.text('Preparing posttest...'), findsOneWidget);
+    await tester.pump(const Duration(seconds: 3));
+    await tester.pumpAndSettle();
+
+    expect(repository.fetchWorkspaceCalls, 1);
+    expect(find.text('Posttest Perkalian'), findsWidgets);
   });
+
+  testWidgets(
+    'workspace voice input is present and manual video trigger is hidden',
+    (tester) async {
+      tester.view.physicalSize = const Size(430, 932);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final player = FakeAudioPlayer()..autoComplete = false;
+      final speechController = SpeechController(
+        apiClient: FakeSpeechApiClient(),
+        player: player,
+        recorder: FakeAudioRecorder(),
+      );
+      await speechController.init();
+      addTearDown(speechController.dispose);
+
+      await tester.pumpWidget(
+        await _buildSignedInTestApp(
+          homeRepository: const _WorkspaceReadyHomeRepository(),
+          workspaceRepository: const _ExploreWorkspaceRepository(),
+          educationLevel: 'elementary',
+          gradeLevel: '4',
+          speechController: speechController,
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.ensureVisible(find.text('Continue session'));
+      await tester.tap(find.text('Continue session'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Voice input'), findsOneWidget);
+      expect(find.text('Generate video from this chat'), findsNothing);
+      unawaited(speechController.speak('Speech that must stop for video.'));
+      await tester.pump();
+      await tester.pump();
+      expect(speechController.mode, SpeechMode.speaking);
+    },
+  );
 
   testWidgets('workspace hides posttest until backend marks it eligible', (
     tester,
@@ -349,6 +378,106 @@ void main() {
       workspaceRepository.moduleStateUpdates,
       isNot(contains('completed')),
     );
+  });
+
+  testWidgets('workspace phase checkpoint advances only after confirmation', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(430, 932);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final workspaceRepository = _CheckpointWorkspaceRepository();
+    await tester.pumpWidget(
+      await _buildSignedInTestApp(
+        homeRepository: const _WorkspaceReadyHomeRepository(),
+        workspaceRepository: workspaceRepository,
+        educationLevel: 'elementary',
+        gradeLevel: '4',
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue session'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Advance phase'), findsNothing);
+    expect(
+      find.textContaining('why three groups of four make twelve'),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.text('Not yet'));
+    await tester.pumpAndSettle();
+    expect(workspaceRepository.advancePhaseCalls, 0);
+    expect(workspaceRepository.appendedEvents, hasLength(1));
+    expect(
+      workspaceRepository.appendedEvents.single.metadata,
+      containsPair('interaction_type', 'phase_checkpoint'),
+    );
+    expect(
+      workspaceRepository.appendedEvents.single.metadata,
+      containsPair('checkpoint_decision', 'stay'),
+    );
+    expect(
+      find.text('Not yet, I still need help with this part.'),
+      findsOneWidget,
+    );
+    expect(find.text('Let us use a different example.'), findsOneWidget);
+    expect(
+      find.textContaining('why three groups of four make twelve'),
+      findsNothing,
+    );
+
+    await tester.enterText(find.byType(TextField).last, 'One more question');
+    await tester.testTextInput.receiveAction(TextInputAction.send);
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('connect 3 × 4 to repeated addition'),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.text('Yes'));
+    await tester.pumpAndSettle();
+    expect(workspaceRepository.advancePhaseCalls, 1);
+    expect(find.text('Explore'), findsWidgets);
+  });
+
+  testWidgets('failed checkpoint stay keeps the checkpoint retryable', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(430, 932);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    final workspaceRepository = _CheckpointWorkspaceRepository(
+      failNextCheckpointStay: true,
+    );
+    await tester.pumpWidget(
+      await _buildSignedInTestApp(
+        homeRepository: const _WorkspaceReadyHomeRepository(),
+        workspaceRepository: workspaceRepository,
+        educationLevel: 'elementary',
+        gradeLevel: '4',
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Continue session'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Not yet'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Not yet'), findsOneWidget);
+    expect(
+      find.textContaining('why three groups of four make twelve'),
+      findsOneWidget,
+    );
+
+    await tester.tap(find.text('Not yet'));
+    await tester.pumpAndSettle();
+    expect(find.text('Let us use a different example.'), findsOneWidget);
   });
 
   testWidgets('learning report detail renders backend payload', (tester) async {
@@ -422,6 +551,8 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Work evidence'), findsOneWidget);
     expect(find.text('Upload work image'), findsOneWidget);
+    expect(find.text('Submit answer'), findsNothing);
+    expect(find.text('Submit answer with evidence'), findsOneWidget);
 
     await tester.enterText(find.byType(TextField).last, '4 groups of 3 is 12');
     await tester.ensureVisible(find.text('Submit answer with evidence'));
@@ -925,6 +1056,11 @@ class _FakeHomeRepository implements HomeRepository {
   }
 
   @override
+  Future<DailyEvaluationSession> fetchPosttest({required String sessionId}) {
+    return startPosttest();
+  }
+
+  @override
   Future<DailyEvaluationAnswerResult> submitPosttestAnswer({
     required String sessionId,
     required String questionId,
@@ -998,6 +1134,48 @@ class _WorkspaceReadyHomeRepository extends _FakeHomeRepository {
         status: 'ready',
       ),
     );
+  }
+}
+
+class _ReadySessionOnlyHomeRepository extends _WorkspaceReadyHomeRepository {
+  const _ReadySessionOnlyHomeRepository();
+
+  @override
+  Future<DailyEvaluationSession> startPosttest({
+    String? workspaceSessionId,
+    String? learningGoalId,
+    String? trackId,
+    String? moduleId,
+  }) {
+    throw StateError('A ready workspace must reuse its posttest session.');
+  }
+
+  @override
+  Future<DailyEvaluationSession> fetchPosttest({required String sessionId}) {
+    return super.startPosttest();
+  }
+}
+
+class _RefreshingReadySessionHomeRepository
+    extends _ReadySessionOnlyHomeRepository {
+  bool _posttestFinalized = false;
+  bool postFinalizeSnapshotRequested = false;
+
+  @override
+  Future<HomeSnapshot> fetchSnapshot() {
+    if (_posttestFinalized) {
+      postFinalizeSnapshotRequested = true;
+    }
+    return super.fetchSnapshot();
+  }
+
+  @override
+  Future<AdaptivePosttestResult> finalizePosttest({
+    required String sessionId,
+  }) async {
+    final result = await super.finalizePosttest(sessionId: sessionId);
+    _posttestFinalized = true;
+    return result;
   }
 }
 
@@ -1092,6 +1270,7 @@ class _FakeWorkspaceRepository implements WorkspaceRepository {
   Future<String> uploadCanvasImage({
     required Uint8List bytes,
     String filename = 'canvas.png',
+    String mimeType = 'image/png',
   }) async => 'image-asset-1';
 
   @override
@@ -1280,6 +1459,276 @@ class _FakeWorkspaceRepository implements WorkspaceRepository {
         posttestSessionId: 'posttest-widget-test',
         questionCount: 10,
       ),
+    );
+  }
+}
+
+class _ExploreWorkspaceRepository extends _FakeWorkspaceRepository {
+  const _ExploreWorkspaceRepository();
+
+  @override
+  Future<WorkspaceSession> createOrResumeWorkspace({
+    required String trackId,
+    required String moduleId,
+    String? workspaceSessionId,
+    bool startNewSession = false,
+  }) async {
+    return WorkspaceSession(
+      id: workspaceSessionId ?? 'workspace-perkalian',
+      trackId: trackId,
+      moduleId: moduleId,
+      currentTopic: 'Perkalian',
+      contentMode: 'chat',
+      status: 'active',
+      events: const [],
+      currentPhase: 'explore',
+      phaseTransitionPending: false,
+      posttestEligible: false,
+    );
+  }
+}
+
+class _CheckpointWorkspaceRepository extends _FakeWorkspaceRepository {
+  _CheckpointWorkspaceRepository({this.failNextCheckpointStay = false});
+
+  int advancePhaseCalls = 0;
+  final List<WorkspaceEvent> appendedEvents = [];
+  bool failNextCheckpointStay;
+
+  WorkspaceSession _engageWorkspace({List<WorkspaceEvent>? events}) {
+    return WorkspaceSession(
+      id: 'workspace-perkalian',
+      trackId: 'track-perkalian',
+      moduleId: 'module-perkalian',
+      currentTopic: 'Perkalian',
+      contentMode: 'chat',
+      status: 'active',
+      events:
+          events ??
+          const [
+            WorkspaceEvent(
+              id: 'event-tutor-checkpoint',
+              workspaceId: 'workspace-perkalian',
+              eventIndex: 0,
+              eventType: 'text',
+              actorType: 'tutor',
+              textPayload: 'You found the equal groups in the example.',
+              metadata: {
+                'phase_checkpoint_question':
+                    'After arranging 3 × 4 into equal groups, are you confident why three groups of four make twelve?',
+                'evidence_request': {
+                  'type': 'micro_check',
+                  'prompt': 'Try one more example.',
+                  'expected_evidence': 'A correct explanation.',
+                },
+              },
+            ),
+          ],
+      currentPhase: 'engage',
+      phaseTransitionPending: true,
+      posttestEligible: false,
+    );
+  }
+
+  @override
+  Future<WorkspaceSession> createOrResumeWorkspace({
+    required String trackId,
+    required String moduleId,
+    String? workspaceSessionId,
+    bool startNewSession = false,
+  }) async => _engageWorkspace();
+
+  @override
+  Future<WorkspaceAppendResult> appendEvent({
+    required String workspaceId,
+    required String eventType,
+    String textPayload = '',
+    Map<String, dynamic> metadata = const {},
+    String? imageAssetId,
+  }) async {
+    if (metadata['interaction_type'] == 'phase_checkpoint' &&
+        metadata['checkpoint_decision'] == 'stay' &&
+        failNextCheckpointStay) {
+      failNextCheckpointStay = false;
+      throw const WorkspaceException('Temporary checkpoint sync failure.');
+    }
+    final event = WorkspaceEvent(
+      id: 'event-checkpoint',
+      workspaceId: workspaceId,
+      eventIndex: 1,
+      eventType: eventType,
+      actorType: 'learner',
+      textPayload: textPayload,
+      metadata: metadata,
+    );
+    appendedEvents.add(event);
+    if (metadata['interaction_type'] == 'phase_checkpoint' &&
+        metadata['checkpoint_decision'] == 'stay') {
+      const tutorEvent = WorkspaceEvent(
+        id: 'event-tutor-checkpoint-stay',
+        workspaceId: 'workspace-perkalian',
+        eventIndex: 2,
+        eventType: 'text',
+        actorType: 'tutor',
+        textPayload: 'Let us use a different example.',
+        metadata: {},
+      );
+      return WorkspaceAppendResult(
+        event: event,
+        tutorResponse: const WorkspaceTutorResponse(
+          text: 'Let us use a different example.',
+          intent: 'engage_probe',
+          nextActions: [],
+          nextPhaseReady: false,
+        ),
+        workspace: WorkspaceSession(
+          id: 'workspace-perkalian',
+          trackId: 'track-perkalian',
+          moduleId: 'module-perkalian',
+          currentTopic: 'Perkalian',
+          contentMode: 'chat',
+          status: 'active',
+          events: [event, tutorEvent],
+          currentPhase: 'engage',
+          phaseTransitionPending: false,
+          posttestEligible: false,
+        ),
+      );
+    }
+    const tutorEvent = WorkspaceEvent(
+      id: 'event-tutor-checkpoint-updated',
+      workspaceId: 'workspace-perkalian',
+      eventIndex: 2,
+      eventType: 'text',
+      actorType: 'tutor',
+      textPayload: 'Let us check that connection.',
+      metadata: {
+        'phase_checkpoint_question':
+            'From your latest example, can you now connect 3 × 4 to repeated addition without help?',
+      },
+    );
+    return WorkspaceAppendResult(
+      event: event,
+      tutorResponse: const WorkspaceTutorResponse(
+        text: 'Let us check that connection.',
+        intent: 'engage_probe',
+        nextActions: [],
+        nextPhaseReady: true,
+        phaseCheckpointQuestion:
+            'From your latest example, can you now connect 3 × 4 to repeated addition without help?',
+      ),
+      workspace: _engageWorkspace(events: [event, tutorEvent]),
+    );
+  }
+
+  @override
+  Future<WorkspaceSession> advancePhase({required String workspaceId}) async {
+    advancePhaseCalls += 1;
+    return const WorkspaceSession(
+      id: 'workspace-perkalian',
+      trackId: 'track-perkalian',
+      moduleId: 'module-perkalian',
+      currentTopic: 'Perkalian',
+      contentMode: 'chat',
+      status: 'active',
+      events: [],
+      currentPhase: 'explore',
+      phaseTransitionPending: false,
+      posttestEligible: false,
+    );
+  }
+}
+
+class _AsyncPosttestWorkspaceRepository extends _FakeWorkspaceRepository {
+  int fetchWorkspaceCalls = 0;
+
+  @override
+  Future<WorkspaceSession> createOrResumeWorkspace({
+    required String trackId,
+    required String moduleId,
+    String? workspaceSessionId,
+    bool startNewSession = false,
+  }) async {
+    return const WorkspaceSession(
+      id: 'workspace-perkalian',
+      trackId: 'track-perkalian',
+      moduleId: 'module-perkalian',
+      currentTopic: 'Perkalian',
+      contentMode: 'chat',
+      status: 'active',
+      events: [],
+      currentPhase: 'evaluate',
+      phaseTransitionPending: false,
+      posttestEligible: true,
+    );
+  }
+
+  @override
+  Future<WorkspaceSession> startPosttest({required String workspaceId}) async {
+    return const WorkspaceSession(
+      id: 'workspace-perkalian',
+      trackId: 'track-perkalian',
+      moduleId: 'module-perkalian',
+      currentTopic: 'Perkalian',
+      contentMode: 'chat',
+      status: 'active',
+      events: [],
+      currentPhase: 'evaluate',
+      phaseTransitionPending: false,
+      posttestEligible: true,
+      posttestTrigger: WorkspacePosttestTrigger(
+        status: 'generating',
+        reason: 'evaluate_evidence_verified',
+        posttestSessionId: 'posttest-widget-test',
+      ),
+    );
+  }
+
+  @override
+  Future<WorkspaceSession> fetchWorkspace(String workspaceId) async {
+    fetchWorkspaceCalls += 1;
+    return const WorkspaceSession(
+      id: 'workspace-perkalian',
+      trackId: 'track-perkalian',
+      moduleId: 'module-perkalian',
+      currentTopic: 'Perkalian',
+      contentMode: 'chat',
+      status: 'active',
+      events: [],
+      currentPhase: 'evaluate',
+      phaseTransitionPending: false,
+      posttestEligible: false,
+      posttestTrigger: WorkspacePosttestTrigger(
+        status: 'ready',
+        reason: 'evaluate_evidence_verified',
+        posttestSessionId: 'posttest-widget-test',
+        questionCount: 10,
+      ),
+    );
+  }
+}
+
+class _EligibleWorkspaceRepository extends _FakeWorkspaceRepository {
+  const _EligibleWorkspaceRepository();
+
+  @override
+  Future<WorkspaceSession> createOrResumeWorkspace({
+    required String trackId,
+    required String moduleId,
+    String? workspaceSessionId,
+    bool startNewSession = false,
+  }) async {
+    return const WorkspaceSession(
+      id: 'workspace-perkalian',
+      trackId: 'track-perkalian',
+      moduleId: 'module-perkalian',
+      currentTopic: 'Perkalian',
+      contentMode: 'chat',
+      status: 'active',
+      events: [],
+      currentPhase: 'evaluate',
+      phaseTransitionPending: false,
+      posttestEligible: true,
     );
   }
 }

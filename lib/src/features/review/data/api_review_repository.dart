@@ -99,11 +99,7 @@ class ApiReviewRepository implements ReviewRepository {
   Future<bool> isCurrentUserTeacher() async {
     try {
       final json = await _apiClient.getJson('/api/v1/me');
-      final account = json['account'];
-      if (account is Map) {
-        return (account['role']?.toString() ?? '') == 'teacher';
-      }
-      return false;
+      return (json['role']?.toString() ?? '') == 'teacher';
     } catch (_) {
       return false;
     }

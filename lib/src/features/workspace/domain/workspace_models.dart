@@ -20,6 +20,7 @@ class WorkspaceCompletionResult {
     required this.moduleCompleted,
     required this.requestedEarlyPosttest,
     this.workspaceSessionId,
+    this.posttestSessionId,
   });
 
   final String trackId;
@@ -28,6 +29,7 @@ class WorkspaceCompletionResult {
   final bool moduleCompleted;
   final bool requestedEarlyPosttest;
   final String? workspaceSessionId;
+  final String? posttestSessionId;
 }
 
 class WorkspaceSession {
@@ -133,6 +135,8 @@ class WorkspacePosttestTrigger {
   final String? error;
 
   bool get isReady => status.toLowerCase() == 'ready';
+  bool get isGenerating => status.toLowerCase() == 'generating';
+  bool get isFailed => status.toLowerCase() == 'error';
 }
 
 /// Locally cached pointer to the workspace the learner was last in, for a
@@ -214,6 +218,25 @@ class WorkspaceEvent {
   Map<String, dynamic>? get tutorExplanationCard =>
       _structuredTutorMetadata('explanation_card');
 
+  String? get tutorPhaseCheckpointQuestion =>
+      _nonEmptyMetadataString('phase_checkpoint_question');
+
+  String? get tutorPhaseReasoning => _nonEmptyMetadataString('phase_reasoning');
+
+  WorkspaceToolSuggestion? get tutorToolSuggestion {
+    final value = _structuredTutorMetadata('tool_suggestion');
+    return value == null ? null : WorkspaceToolSuggestion.fromMap(value);
+  }
+
+  String? get mediaJobId => _nonEmptyMetadataString('job_id');
+
+  String? get mediaQueueStatus => _nonEmptyMetadataString('queue_status');
+
+  String? _nonEmptyMetadataString(String key) {
+    final value = metadata[key]?.toString().trim() ?? '';
+    return value.isEmpty ? null : value;
+  }
+
   Map<String, dynamic>? _structuredTutorMetadata(String key) {
     final value = metadata[key];
     if (value is! Map) {
@@ -230,6 +253,7 @@ class WorkspaceTutorResponse {
     required this.nextActions,
     required this.nextPhaseReady,
     this.phaseReasoning,
+    this.phaseCheckpointQuestion,
     this.evidenceTags = const [],
     this.correctness = 'unknown',
     this.misconceptionStatus = 'none',
@@ -239,6 +263,7 @@ class WorkspaceTutorResponse {
     this.evidenceRequest,
     this.explanationCard,
     this.degraded = false,
+    this.toolSuggestion,
   });
 
   final String text;
@@ -246,6 +271,7 @@ class WorkspaceTutorResponse {
   final List<String> nextActions;
   final bool nextPhaseReady;
   final String? phaseReasoning;
+  final String? phaseCheckpointQuestion;
   final List<String> evidenceTags;
   final String correctness;
   final String misconceptionStatus;
@@ -255,10 +281,35 @@ class WorkspaceTutorResponse {
   final Map<String, dynamic>? evidenceRequest;
   final Map<String, dynamic>? explanationCard;
   final bool degraded;
+  final WorkspaceToolSuggestion? toolSuggestion;
 
   bool get isJudged => correctness != 'unknown';
   bool get hasMisconception =>
       misconceptionStatus == 'suspected' || misconceptionStatus == 'active';
+}
+
+class WorkspaceToolSuggestion {
+  const WorkspaceToolSuggestion({
+    required this.tool,
+    required this.reason,
+    required this.prompt,
+  });
+
+  final String tool;
+  final String reason;
+  final String prompt;
+
+  bool get isVisualization => tool.toLowerCase() == 'visualization';
+
+  static WorkspaceToolSuggestion? fromMap(Map<String, dynamic> value) {
+    final tool = value['tool']?.toString().trim() ?? '';
+    final reason = value['reason']?.toString().trim() ?? '';
+    final prompt = value['prompt']?.toString().trim() ?? '';
+    if (tool.isEmpty || reason.isEmpty || prompt.isEmpty) {
+      return null;
+    }
+    return WorkspaceToolSuggestion(tool: tool, reason: reason, prompt: prompt);
+  }
 }
 
 class WorkspaceMasteryUpdate {

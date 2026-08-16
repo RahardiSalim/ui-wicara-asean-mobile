@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:video_player/video_player.dart';
 
@@ -53,6 +55,8 @@ class WorkspaceModulesPage extends StatefulWidget {
 class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
   static const _videoPollingInterval = Duration(seconds: 3);
   static const _videoPollingTimeout = Duration(minutes: 5);
+  static const _posttestPollingInterval = Duration(seconds: 3);
+  static const _posttestPollingTimeout = Duration(minutes: 10);
 
   final _messageController = TextEditingController();
   final _scrollController = ScrollController();
@@ -72,12 +76,19 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
   String? _videoStatusMessage;
   String? _videoErrorMessage;
   bool _isWorkspaceHeaderExpanded = false;
-  List<WorkspaceSessionSummary> _sessionHistory = const [];
-  String? _activeSessionId;
   int _workspaceRequestSerial = 0;
   WorkspaceTutorResponse? _lastTutorResponse;
   WorkspaceMasteryUpdate? _lastMasteryUpdate;
   String? _activeVideoJobId;
+  bool _stopPosttestPolling = false;
+  String? _activePosttestPollingWorkspaceId;
+  String? _declinedPhaseTransition;
+  Uint8List? _pendingAttachmentBytes;
+  String? _pendingAttachmentAssetId;
+  String? _pendingAttachmentName;
+  String? _pendingAttachmentMimeType;
+  CanvasWorkSnapshot? _pendingCanvasSnapshot;
+  bool _isUploadingAttachment = false;
 
   /// Latest weekly report fetched from HomeRepository. Null while loading or
   /// if no HomeRepository was provided.
@@ -110,15 +121,13 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
   @override
   void dispose() {
     _stopVideoPolling = true;
+    _stopPosttestPolling = true;
     _messageController.dispose();
     _scrollController.dispose();
     super.dispose();
   }
 
-  Future<void> _loadWorkspace({
-    String? workspaceSessionId,
-    bool startNewSession = false,
-  }) async {
+  Future<void> _loadWorkspace() async {
     final requestSerial = ++_workspaceRequestSerial;
     final arguments = widget.routeArguments;
     if (arguments == null || !arguments.isValid) {
@@ -132,31 +141,24 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     setState(() {
       _isLoadingWorkspace = true;
       _workspaceError = null;
-      if (startNewSession || workspaceSessionId != null) {
-        _resetCurrentChatState(nextActiveSessionId: workspaceSessionId);
-      }
     });
     try {
       final storedHistory = widget.workspaceRepository.sessionHistory(
         trackId: arguments.trackId,
         moduleId: arguments.moduleId,
       );
-      final resolvedWorkspaceSessionId =
-          workspaceSessionId ??
-          (startNewSession ? null : storedHistory.activeWorkspaceId);
       WorkspaceSession workspace;
       try {
         workspace = await widget.workspaceRepository.createOrResumeWorkspace(
           trackId: arguments.trackId,
           moduleId: arguments.moduleId,
-          workspaceSessionId: resolvedWorkspaceSessionId,
-          startNewSession: startNewSession,
+          workspaceSessionId: storedHistory.activeWorkspaceId,
         );
       } on WorkspaceException {
         // A cached id can outlive the session it points at (or belong to a
         // previous account). Fall back to a fresh resume instead of dead-ending
         // the learner on an error they cannot clear from inside the app.
-        if (resolvedWorkspaceSessionId == null) {
+        if (storedHistory.activeWorkspaceId == null) {
           rethrow;
         }
         await widget.workspaceRepository.clearCachedSession(
@@ -173,26 +175,17 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
         moduleId: arguments.moduleId,
         status: 'active',
       );
-      var history = _sessionHistory;
-      try {
-        history = await widget.workspaceRepository.fetchSessionHistory(
-          trackId: arguments.trackId,
-          moduleId: arguments.moduleId,
-        );
-      } on WorkspaceException {
-        history = _sessionHistory;
-      }
       if (!mounted || requestSerial != _workspaceRequestSerial) return;
       setState(() {
         _workspace = workspace;
-        _activeSessionId = workspace.id;
         _chatEntries
           ..clear()
           ..addAll(_entriesFromEvents(workspace.events));
-        _latestVideoArtifact = _withResolvedArtifactUrls(workspace.latestMedia);
-        _sessionHistory = history;
+        _restoreLoadedVideoState(workspace);
         _isLoadingWorkspace = false;
       });
+      _resumePendingVideoPolling(workspace);
+      _resumePendingPosttestPolling(workspace);
       _scrollToBottom();
     } on WorkspaceException catch (error) {
       if (!mounted || requestSerial != _workspaceRequestSerial) return;
@@ -203,161 +196,7 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     }
   }
 
-  Future<void> _startNewChatSession() async {
-    await _loadWorkspace(startNewSession: true);
-  }
-
-  Future<void> _switchToSession(String workspaceId) async {
-    final requestSerial = ++_workspaceRequestSerial;
-    final arguments = widget.routeArguments;
-    if (arguments == null || !arguments.isValid) {
-      return;
-    }
-    if (workspaceId == (_workspace?.id ?? '')) {
-      return;
-    }
-    setState(() {
-      _isLoadingWorkspace = true;
-      _workspaceError = null;
-      _resetCurrentChatState(nextActiveSessionId: workspaceId);
-    });
-    try {
-      final workspace = await widget.workspaceRepository.fetchWorkspace(
-        workspaceId,
-      );
-      await widget.workspaceRepository.setActiveSession(
-        trackId: arguments.trackId,
-        moduleId: arguments.moduleId,
-        workspaceId: workspaceId,
-      );
-      var history = _sessionHistory;
-      try {
-        history = await widget.workspaceRepository.fetchSessionHistory(
-          trackId: arguments.trackId,
-          moduleId: arguments.moduleId,
-        );
-      } on WorkspaceException {
-        history = _sessionHistory;
-      }
-      if (!mounted || requestSerial != _workspaceRequestSerial) {
-        return;
-      }
-      setState(() {
-        _workspace = workspace;
-        _activeSessionId = workspace.id;
-        _chatEntries
-          ..clear()
-          ..addAll(_entriesFromEvents(workspace.events));
-        _latestVideoArtifact = _withResolvedArtifactUrls(workspace.latestMedia);
-        _sessionHistory = history;
-        _isLoadingWorkspace = false;
-      });
-      _scrollToBottom();
-    } on WorkspaceException catch (error) {
-      if (!mounted || requestSerial != _workspaceRequestSerial) {
-        return;
-      }
-      setState(() {
-        _isLoadingWorkspace = false;
-        _workspaceError = error.message;
-      });
-    }
-  }
-
-  void _resetCurrentChatState({String? nextActiveSessionId}) {
-    _workspace = null;
-    _activeSessionId = nextActiveSessionId;
-    _isAppendingEvent = false;
-    _isPhaseSubmitting = false;
-    _isVideoGenerating = false;
-    _stopVideoPolling = true;
-    _chatEntries.clear();
-    _canvasSnapshots.clear();
-    _contentMode = _WorkspaceContentMode.choosing;
-    _latestVideoStatus = null;
-    _latestVideoArtifact = null;
-    _videoStatusMessage = null;
-    _videoErrorMessage = null;
-    _lastTutorResponse = null;
-    _lastMasteryUpdate = null;
-    _activeVideoJobId = null;
-  }
-
-  Future<void> _openSessionHistorySheet() async {
-    final arguments = widget.routeArguments;
-    if (arguments == null || !arguments.isValid) {
-      return;
-    }
-    List<WorkspaceSessionSummary> sessions = _sessionHistory;
-    try {
-      sessions = await widget.workspaceRepository.fetchSessionHistory(
-        trackId: arguments.trackId,
-        moduleId: arguments.moduleId,
-      );
-      if (mounted) {
-        setState(() => _sessionHistory = sessions);
-      }
-    } on WorkspaceException catch (error) {
-      if (!mounted) {
-        return;
-      }
-      setState(() => _workspaceError = error.message);
-      return;
-    }
-    if (!mounted || sessions.isEmpty) {
-      return;
-    }
-    final selected = await showModalBottomSheet<String>(
-      context: context,
-      showDragHandle: true,
-      builder: (context) {
-        return _WorkspaceHistorySheet(
-          sessions: sessions,
-          activeSessionId: _activeSessionId,
-          material: _workspaceMaterial,
-          onDeleteSession: (id) => unawaited(_deleteSession(id)),
-        );
-      },
-    );
-    if (selected != null) {
-      await _switchToSession(selected);
-    }
-  }
-
-  Future<void> _deleteSession(String workspaceId) async {
-    final arguments = widget.routeArguments;
-    if (arguments == null || !arguments.isValid) {
-      return;
-    }
-    try {
-      await widget.workspaceRepository.deleteSession(
-        trackId: arguments.trackId,
-        moduleId: arguments.moduleId,
-        workspaceId: workspaceId,
-      );
-    } on WorkspaceException catch (error) {
-      if (mounted) {
-        setState(() => _workspaceError = error.message);
-      }
-      return;
-    }
-    if (!mounted) {
-      return;
-    }
-    // Deleting the session you are sitting in has to re-resolve which session
-    // to show; deleting any other one only prunes the list.
-    if (workspaceId == _workspace?.id) {
-      await _loadWorkspace();
-      return;
-    }
-    setState(() {
-      _sessionHistory = _sessionHistory
-          .where((session) => session.id != workspaceId)
-          .toList(growable: false);
-    });
-  }
-
-  Future<void> _generateVideo() async {
+  Future<void> _generateVideo({WorkspaceToolSuggestion? suggestion}) async {
     if (_isVideoGenerating) {
       return;
     }
@@ -365,6 +204,12 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     if (workspace == null) {
       setState(() {
         _workspaceError = _workspaceMaterial.workspaceNotReadyMessage;
+      });
+      return;
+    }
+    if (!_canGenerateVideoForCurrentTopic()) {
+      setState(() {
+        _workspaceError = _workspaceMaterial.visualOnlyExploreMessage;
       });
       return;
     }
@@ -398,10 +243,16 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
         qualityProfile: 'standard',
         conceptId: workspace.learningContext.currentModuleConceptId,
         metadata: {
-          'triggered_by': 'workspace_mid_chat_button',
+          'triggered_by': suggestion == null
+              ? 'workspace_mid_chat_button'
+              : 'tutor_visual_suggestion',
           'chat_turn_count': chatTurnCount,
           'workspace_content_mode': _contentMode.name,
           'current_phase': workspace.currentPhase,
+          if (suggestion != null) ...{
+            'suggestion_reason': suggestion.reason,
+            'suggestion_prompt': suggestion.prompt,
+          },
         },
       );
 
@@ -482,7 +333,6 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
           if (status.isReady) {
             await _refreshWorkspaceAfterReady();
           }
-          _scrollToBottom();
           return;
         }
       } on WorkspaceException catch (error) {
@@ -555,7 +405,52 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     }
   }
 
-  bool _canGenerateVideoForCurrentTopic() => _workspace != null;
+  void _restoreLoadedVideoState(WorkspaceSession workspace) {
+    final artifact = _withResolvedArtifactUrls(workspace.latestMedia);
+    _latestVideoArtifact = artifact;
+    _latestVideoStatus = null;
+    _videoStatusMessage = null;
+    _videoErrorMessage = null;
+    _isVideoGenerating = false;
+    if (artifact?.isReady == true) {
+      _contentMode = _WorkspaceContentMode.videoReady;
+    } else if (artifact?.status.toLowerCase() == 'failed') {
+      _contentMode = _WorkspaceContentMode.videoFailed;
+      _videoErrorMessage = _workspaceMaterial.videoGenerationFailedMessage;
+    } else {
+      _contentMode = _WorkspaceContentMode.choosing;
+    }
+  }
+
+  void _resumePendingVideoPolling(WorkspaceSession workspace) {
+    if (workspace.latestMedia?.isReady == true ||
+        workspace.latestMedia?.status.toLowerCase() == 'failed') {
+      return;
+    }
+    String? jobId;
+    for (final event in workspace.events.reversed) {
+      final queueStatus = event.mediaQueueStatus?.toLowerCase();
+      if (event.eventType == 'media_generated' &&
+          event.mediaJobId != null &&
+          (queueStatus == 'queued' || queueStatus == 'processing')) {
+        jobId = event.mediaJobId;
+        break;
+      }
+    }
+    if (jobId == null || !mounted || _workspace?.id != workspace.id) {
+      return;
+    }
+    setState(() {
+      _isVideoGenerating = true;
+      _contentMode = _WorkspaceContentMode.videoProcessing;
+      _videoStatusMessage = _workspaceMaterial.videoQueuedMessage;
+    });
+    unawaited(_pollVideoStatus(jobId: jobId));
+  }
+
+  bool _canGenerateVideoForCurrentTopic() =>
+      _workspace?.status.toLowerCase() == 'active' &&
+      _workspace?.currentPhase.toLowerCase() == 'explore';
 
   String _normalizedLanguageCode() {
     final workspaceLanguage = _workspace?.learnerLanguage
@@ -650,6 +545,7 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     setState(() {
       _isPhaseSubmitting = true;
       _workspaceError = null;
+      _declinedPhaseTransition = null;
     });
     try {
       final updated = await widget.workspaceRepository.advancePhase(
@@ -658,25 +554,13 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
       if (!mounted || _workspace?.id != workspace.id) {
         return;
       }
-      final arguments = widget.routeArguments;
-      var history = _sessionHistory;
-      if (arguments != null && arguments.isValid) {
-        try {
-          history = await widget.workspaceRepository.fetchSessionHistory(
-            trackId: arguments.trackId,
-            moduleId: arguments.moduleId,
-          );
-        } on WorkspaceException {
-          history = _sessionHistory;
-        }
-      }
-      if (!mounted || _workspace?.id != workspace.id) {
-        return;
-      }
       setState(() {
         _workspace = updated;
-        _sessionHistory = history;
+        _chatEntries
+          ..clear()
+          ..addAll(_entriesFromEvents(updated.events));
         _isPhaseSubmitting = false;
+        _declinedPhaseTransition = null;
       });
     } on WorkspaceException catch (error) {
       if (!mounted || _workspace?.id != workspace.id) {
@@ -689,6 +573,78 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     }
   }
 
+  bool _shouldShowPhaseCheckpoint(WorkspaceSession? workspace) {
+    if (workspace == null ||
+        workspace.currentPhase.toLowerCase() == 'evaluate' ||
+        workspace.status.toLowerCase() != 'active' ||
+        !workspace.phaseTransitionPending ||
+        _isLoadingWorkspace ||
+        _isAppendingEvent ||
+        _isPhaseSubmitting) {
+      return false;
+    }
+    return _declinedPhaseTransition != workspace.currentPhase;
+  }
+
+  String _phaseCheckpointQuestion(WorkspaceSession workspace) {
+    final liveQuestion = _lastTutorResponse?.phaseCheckpointQuestion?.trim();
+    if (liveQuestion != null && liveQuestion.isNotEmpty) {
+      return liveQuestion;
+    }
+
+    for (final event in workspace.events.reversed) {
+      final question = event.tutorPhaseCheckpointQuestion?.trim();
+      if (question != null && question.isNotEmpty) {
+        return question;
+      }
+    }
+
+    final topic = workspace.learningContext.currentModuleLabel.trim().isNotEmpty
+        ? workspace.learningContext.currentModuleLabel.trim()
+        : workspace.currentTopic.trim();
+    final latestLearnerText = workspace.events.reversed
+        .where(
+          (event) => event.isLearner && event.textPayload.trim().isNotEmpty,
+        )
+        .map((event) => event.textPayload.trim())
+        .firstOrNull;
+    final reasoning = workspace.events.reversed
+        .map((event) => event.tutorPhaseReasoning?.trim())
+        .whereType<String>()
+        .where((value) => value.isNotEmpty && !value.contains('_'))
+        .firstOrNull;
+    return _workspaceMaterial.phaseCheckpointFallback(
+      topic: topic,
+      learnerEvidence: latestLearnerText ?? reasoning ?? topic,
+    );
+  }
+
+  Future<void> _stayInCurrentPhase() async {
+    final workspace = _workspace;
+    if (workspace == null ||
+        _isLoadingWorkspace ||
+        _isAppendingEvent ||
+        _isPhaseSubmitting ||
+        !workspace.phaseTransitionPending) {
+      return;
+    }
+    final message = _workspaceMaterial.stayInPhaseMessage;
+    setState(() {
+      _declinedPhaseTransition = workspace.currentPhase;
+      _chatEntries.add(_WorkspaceChatEntry.text(text: message, isUser: true));
+    });
+    _scrollToBottom();
+    await _appendWorkspaceEvent(
+      eventType: 'text',
+      textPayload: message,
+      metadata: const {
+        'interaction_type': 'phase_checkpoint',
+        'checkpoint_decision': 'stay',
+      },
+    );
+    _scrollToBottom();
+  }
+
   Future<void> _startPosttestFromWorkspace() async {
     final workspace = _workspace;
     if (workspace == null || _isLoadingWorkspace || _isPhaseSubmitting) {
@@ -697,6 +653,10 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     final trigger = workspace.posttestTrigger;
     if (trigger?.isReady == true) {
       _openPosttestFromWorkspace();
+      return;
+    }
+    if (trigger?.isGenerating == true) {
+      _resumePendingPosttestPolling(workspace);
       return;
     }
     if (!workspace.posttestEligible) {
@@ -738,10 +698,12 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
       }
       setState(() {
         _workspace = updated;
-        _isPhaseSubmitting = false;
+        _isPhaseSubmitting = updated.posttestTrigger?.isGenerating == true;
       });
       if (updated.posttestTrigger?.isReady == true) {
         _openPosttestFromWorkspace();
+      } else if (updated.posttestTrigger?.isGenerating == true) {
+        unawaited(_pollPosttestStatus(workspace.id));
       } else {
         setState(() {
           _workspaceError =
@@ -760,6 +722,88 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     }
   }
 
+  void _resumePendingPosttestPolling(WorkspaceSession workspace) {
+    if (workspace.posttestTrigger?.isGenerating != true ||
+        _activePosttestPollingWorkspaceId == workspace.id) {
+      return;
+    }
+    if (mounted) {
+      setState(() {
+        _isPhaseSubmitting = true;
+        _workspaceError = null;
+      });
+    }
+    unawaited(_pollPosttestStatus(workspace.id));
+  }
+
+  Future<void> _pollPosttestStatus(String workspaceId) async {
+    if (_activePosttestPollingWorkspaceId == workspaceId) {
+      return;
+    }
+    _activePosttestPollingWorkspaceId = workspaceId;
+    final deadline = DateTime.now().add(_posttestPollingTimeout);
+    String? lastError;
+    try {
+      while (!_stopPosttestPolling && DateTime.now().isBefore(deadline)) {
+        await Future<void>.delayed(_posttestPollingInterval);
+        if (!mounted || _workspace?.id != workspaceId) {
+          return;
+        }
+        WorkspaceSession refreshed;
+        try {
+          refreshed = await widget.workspaceRepository.fetchWorkspace(
+            workspaceId,
+          );
+          lastError = null;
+        } on WorkspaceException catch (error) {
+          lastError = error.message;
+          continue;
+        }
+        if (!mounted || _workspace?.id != workspaceId) {
+          return;
+        }
+        final trigger = refreshed.posttestTrigger;
+        setState(() {
+          _workspace = refreshed;
+          _chatEntries
+            ..clear()
+            ..addAll(_entriesFromEvents(refreshed.events));
+        });
+        if (trigger?.isReady == true) {
+          setState(() => _isPhaseSubmitting = false);
+          _openPosttestFromWorkspace();
+          return;
+        }
+        if (trigger?.isFailed == true) {
+          setState(() {
+            _isPhaseSubmitting = false;
+            _workspaceError =
+                trigger?.error ?? _workspaceMaterial.posttestUnavailableMessage;
+          });
+          return;
+        }
+        if (trigger?.isGenerating != true) {
+          setState(() {
+            _isPhaseSubmitting = false;
+            _workspaceError = _workspaceMaterial.posttestUnavailableMessage;
+          });
+          return;
+        }
+      }
+      if (mounted && _workspace?.id == workspaceId) {
+        setState(() {
+          _isPhaseSubmitting = false;
+          _workspaceError =
+              lastError ?? _workspaceMaterial.posttestGenerationDelayedMessage;
+        });
+      }
+    } finally {
+      if (_activePosttestPollingWorkspaceId == workspaceId) {
+        _activePosttestPollingWorkspaceId = null;
+      }
+    }
+  }
+
   void _openPosttestFromWorkspace() {
     final arguments = widget.routeArguments;
     final workspaceTitle = _workspace?.currentTopic.trim() ?? '';
@@ -773,62 +817,123 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
         moduleCompleted: _workspace?.status == 'completed',
         requestedEarlyPosttest: false,
         workspaceSessionId: _workspace?.id,
+        posttestSessionId: _workspace?.posttestTrigger?.posttestSessionId,
       ),
     );
   }
 
   Future<void> _handleCanvasSentToChat(CanvasWorkSnapshot snapshot) async {
-    setState(() {
-      _canvasSnapshots.add(snapshot);
-      _chatEntries.add(_WorkspaceChatEntry.canvas(snapshot));
-    });
-    _scrollToBottom();
-
-    // Upload the drawing itself, not just a description of it: without the
-    // image the tutor is answering blind about work it cannot see.
+    if (_isAppendingEvent || _isUploadingAttachment) return;
     String? imageAssetId;
+    Uint8List? imageBytes;
     try {
-      final png = await renderCanvasSnapshotPng(
+      imageBytes = await renderCanvasSnapshotPng(
         snapshot,
         copy: OnboardingCopy.forLanguage(
           widget.onboardingController.profile.preferredLanguage,
         ),
       );
-      if (png != null) {
+      if (imageBytes != null) {
+        setState(() => _isUploadingAttachment = true);
         imageAssetId = await widget.workspaceRepository.uploadCanvasImage(
-          bytes: png,
+          bytes: imageBytes,
+          filename: 'canvas.png',
+          mimeType: 'image/png',
         );
       }
     } on WorkspaceException catch (error) {
       if (mounted) {
         setState(() {
+          _isUploadingAttachment = false;
           _workspaceError = _workspaceMaterial.canvasUploadFailedMessage(
             error.message,
           );
         });
       }
+      return;
+    } finally {
+      if (mounted) setState(() => _isUploadingAttachment = false);
     }
+    if (!mounted || imageAssetId == null || imageBytes == null) return;
+    setState(() {
+      _pendingAttachmentBytes = imageBytes;
+      _pendingAttachmentAssetId = imageAssetId;
+      _pendingAttachmentName = 'canvas.png';
+      _pendingAttachmentMimeType = 'image/png';
+      _pendingCanvasSnapshot = snapshot;
+      _workspaceError = null;
+    });
+  }
 
-    await _appendWorkspaceEvent(
-      eventType: 'canvas_sent',
-      imageAssetId: imageAssetId,
-      metadata: {
-        'version': snapshot.version,
-        'element_count': snapshot.elementCount,
-        'has_attachment': snapshot.hasAttachment,
-        'show_grid': snapshot.showGrid,
-        'canvas_width': snapshot.canvasSize.width,
-        'canvas_height': snapshot.canvasSize.height,
-        'image_uploaded': imageAssetId != null,
-      },
+  Future<void> _pickWorkspaceImage() async {
+    if (_isAppendingEvent || _isUploadingAttachment) return;
+    final result = await FilePicker.pickFiles(
+      type: FileType.custom,
+      allowedExtensions: const ['jpg', 'jpeg', 'png', 'webp'],
+      withData: true,
     );
-    _scrollToBottom();
+    if (!mounted || result == null || result.files.isEmpty) return;
+    final file = result.files.single;
+    final bytes = file.bytes;
+    if (bytes == null || bytes.isEmpty) {
+      setState(
+        () => _workspaceError = _workspaceMaterial.imageUnreadableMessage,
+      );
+      return;
+    }
+    if (bytes.length > 10 * 1024 * 1024) {
+      setState(() => _workspaceError = _workspaceMaterial.imageTooLargeMessage);
+      return;
+    }
+    final mimeType = _workspaceImageMimeType(file.extension);
+    setState(() => _isUploadingAttachment = true);
+    try {
+      final imageAssetId = await widget.workspaceRepository.uploadCanvasImage(
+        bytes: bytes,
+        filename: file.name,
+        mimeType: mimeType,
+      );
+      if (!mounted) return;
+      setState(() {
+        _pendingAttachmentBytes = bytes;
+        _pendingAttachmentAssetId = imageAssetId;
+        _pendingAttachmentName = file.name;
+        _pendingAttachmentMimeType = mimeType;
+        _pendingCanvasSnapshot = null;
+        _workspaceError = null;
+      });
+    } on WorkspaceException catch (error) {
+      if (mounted) setState(() => _workspaceError = error.message);
+    } finally {
+      if (mounted) setState(() => _isUploadingAttachment = false);
+    }
+  }
+
+  void _removePendingAttachment() {
+    if (_isAppendingEvent || _isUploadingAttachment) return;
+    setState(() {
+      _pendingAttachmentBytes = null;
+      _pendingAttachmentAssetId = null;
+      _pendingAttachmentName = null;
+      _pendingAttachmentMimeType = null;
+      _pendingCanvasSnapshot = null;
+    });
+  }
+
+  static String _workspaceImageMimeType(String? extension) {
+    return switch (extension?.toLowerCase()) {
+      'jpg' || 'jpeg' => 'image/jpeg',
+      'webp' => 'image/webp',
+      _ => 'image/png',
+    };
   }
 
   Future<void> _sendMessage() async {
     final message = _messageController.text.trim();
-    if (message.isEmpty) return;
-    if (_isAppendingEvent) return;
+    final imageAssetId = _pendingAttachmentAssetId;
+    final canvasSnapshot = _pendingCanvasSnapshot;
+    if (message.isEmpty && imageAssetId == null) return;
+    if (_isAppendingEvent || _isUploadingAttachment) return;
     if (_isLoadingWorkspace || _workspace == null) {
       setState(() {
         _workspaceError = _workspaceMaterial.chatLoadingMessage;
@@ -840,40 +945,31 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     setState(() {
       _chatEntries.add(_WorkspaceChatEntry.text(text: message, isUser: true));
     });
-    await _appendWorkspaceEvent(eventType: 'text', textPayload: message);
-    _scrollToBottom();
-  }
-
-  Future<void> _startLearningChat() async {
-    if (_chatEntries.isNotEmpty) {
-      return;
-    }
-    if (_isLoadingWorkspace || _workspace == null) {
-      setState(() {
-        _workspaceError = _workspaceMaterial.chatLoadingMessage;
-      });
-      return;
-    }
-
-    final workspaceTitle = _workspace?.currentTopic.trim() ?? '';
-    final topic = workspaceTitle.isNotEmpty
-        ? workspaceTitle
-        : _workspaceMaterial.topicTitle;
-    final message = _normalizedLanguageCode() == 'id'
-        ? 'Saya siap mulai belajar $topic.'
-        : "I'm ready to start learning $topic.";
-    setState(() {
-      _chatEntries.add(_WorkspaceChatEntry.text(text: message, isUser: true));
-    });
-    await _appendWorkspaceEvent(
-      eventType: 'text',
+    if (canvasSnapshot != null) _canvasSnapshots.add(canvasSnapshot);
+    final sent = await _appendWorkspaceEvent(
+      eventType: canvasSnapshot == null ? 'text' : 'canvas_sent',
       textPayload: message,
-      metadata: const {'triggered_by': 'workspace_start_chat_button'},
+      imageAssetId: imageAssetId,
+      metadata: {
+        if (canvasSnapshot != null) ...{
+          'version': canvasSnapshot.version,
+          'element_count': canvasSnapshot.elementCount,
+          'has_attachment': canvasSnapshot.hasAttachment,
+          'show_grid': canvasSnapshot.showGrid,
+          'canvas_width': canvasSnapshot.canvasSize.width,
+          'canvas_height': canvasSnapshot.canvasSize.height,
+        },
+        if (imageAssetId != null) 'attachment_name': _pendingAttachmentName,
+        if (_pendingAttachmentMimeType != null)
+          'attachment_mime_type': _pendingAttachmentMimeType,
+        'image_uploaded': imageAssetId != null,
+      },
     );
+    if (sent && mounted) _removePendingAttachment();
     _scrollToBottom();
   }
 
-  Future<void> _appendWorkspaceEvent({
+  Future<bool> _appendWorkspaceEvent({
     required String eventType,
     String textPayload = '',
     Map<String, dynamic> metadata = const {},
@@ -884,7 +980,7 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
       setState(() {
         _workspaceError = _workspaceMaterial.workspaceNotReadyMessage;
       });
-      return;
+      return false;
     }
     setState(() {
       _isAppendingEvent = true;
@@ -898,35 +994,24 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
         metadata: metadata,
         imageAssetId: imageAssetId,
       );
-      if (!mounted || _workspace?.id != workspace.id) return;
-      final arguments = widget.routeArguments;
-      var history = _sessionHistory;
-      if (arguments != null && arguments.isValid) {
-        try {
-          history = await widget.workspaceRepository.fetchSessionHistory(
-            trackId: arguments.trackId,
-            moduleId: arguments.moduleId,
-          );
-        } on WorkspaceException {
-          history = _sessionHistory;
-        }
-      }
-      if (!mounted || _workspace?.id != workspace.id) return;
+      if (!mounted || _workspace?.id != workspace.id) return false;
       setState(() {
         _workspace = result.workspace;
-        _sessionHistory = history;
         _chatEntries
           ..clear()
           ..addAll(_entriesFromEvents(result.workspace.events));
         _isAppendingEvent = false;
         _lastTutorResponse = result.tutorResponse;
         _lastMasteryUpdate = result.masteryUpdate;
+        _declinedPhaseTransition = null;
       });
+      return true;
     } on WorkspaceException catch (error) {
-      if (!mounted || _workspace?.id != workspace.id) return;
+      if (!mounted || _workspace?.id != workspace.id) return false;
       setState(() {
         _isAppendingEvent = false;
         _workspaceError = error.message;
+        _declinedPhaseTransition = null;
         _chatEntries.add(
           _WorkspaceChatEntry.text(
             text: _workspaceMaterial.workspaceSyncFailedMessage(error.message),
@@ -934,6 +1019,7 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
           ),
         );
       });
+      return false;
     }
   }
 
@@ -947,7 +1033,9 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
           if (event.eventType == 'canvas_sent') {
             final count = event.metadata['element_count'];
             return _WorkspaceChatEntry.text(
-              text: material.canvasSnapshotSentLabel(count),
+              text: event.textPayload.trim().isEmpty
+                  ? material.canvasSnapshotSentLabel(count)
+                  : event.textPayload,
               isUser: true,
               imageUrl: imageUrl,
               timestamp: event.createdAt,
@@ -978,6 +1066,7 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
             imageUrl: imageUrl,
             isDegraded: !event.isLearner && event.isDegradedTutorTurn,
             timestamp: event.createdAt,
+            toolSuggestion: event.tutorToolSuggestion,
           );
         })
         .whereType<_WorkspaceChatEntry>()
@@ -1023,19 +1112,6 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     );
   }
 
-  bool _canAdvancePhase(WorkspaceSession? workspace) {
-    if (workspace == null) {
-      return false;
-    }
-    if (workspace.currentPhase == 'evaluate') {
-      return false;
-    }
-    if (_isLoadingWorkspace || _isPhaseSubmitting || _isAppendingEvent) {
-      return false;
-    }
-    return workspace.phaseTransitionPending;
-  }
-
   void _scrollToBottom() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!_scrollController.hasClients) return;
@@ -1069,13 +1145,17 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
     final showStartPosttestButton =
         workspace?.posttestEligible == true ||
         workspace?.posttestTrigger?.isReady == true;
-    final canAdvancePhase = _canAdvancePhase(workspace);
+    final showPhaseCheckpoint = _shouldShowPhaseCheckpoint(workspace);
+    final phaseCheckpointQuestion = workspace == null
+        ? ''
+        : _phaseCheckpointQuestion(workspace);
     final workspaceDescription =
         (_workspace?.currentTopicDescription.trim().isNotEmpty ?? false)
         ? _workspace!.currentTopicDescription.trim()
         : (_workspace == null
               ? material.loadingDescription
               : material.syncedDescription);
+    final showTopicOverview = _chatEntries.isEmpty;
     return Scaffold(
       backgroundColor: WicaraColors.pageBackground,
       body: SafeArea(
@@ -1169,15 +1249,17 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
                               child: Column(
                                 crossAxisAlignment: CrossAxisAlignment.stretch,
                                 children: [
-                                  _WorkspaceTopicCard(
-                                    copy: copy,
-                                    title:
-                                        _workspace?.currentTopic ??
-                                        widget.routeArguments?.moduleTitle ??
-                                        material.topicTitle,
-                                    description: workspaceDescription,
-                                  ),
-                                  const SizedBox(height: 10),
+                                  if (showTopicOverview) ...[
+                                    _WorkspaceTopicCard(
+                                      copy: copy,
+                                      title:
+                                          _workspace?.currentTopic ??
+                                          widget.routeArguments?.moduleTitle ??
+                                          material.topicTitle,
+                                      description: workspaceDescription,
+                                    ),
+                                    const SizedBox(height: 10),
+                                  ],
                                   _PhaseStepperBar(
                                     currentPhase:
                                         workspace?.currentPhase ?? 'engage',
@@ -1185,44 +1267,6 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
                                         workspace?.phaseTransitionPending ??
                                         false,
                                     material: material,
-                                  ),
-                                  const SizedBox(height: 8),
-                                  Row(
-                                    children: [
-                                      Expanded(
-                                        child: OutlinedButton.icon(
-                                          onPressed: _isLoadingWorkspace
-                                              ? null
-                                              : () {
-                                                  unawaited(
-                                                    _startNewChatSession(),
-                                                  );
-                                                },
-                                          icon: const Icon(
-                                            Icons.add_comment_outlined,
-                                          ),
-                                          label: Text(material.newChatLabel),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 8),
-                                      Expanded(
-                                        child: OutlinedButton.icon(
-                                          onPressed: () {
-                                            unawaited(
-                                              _openSessionHistorySheet(),
-                                            );
-                                          },
-                                          icon: const Icon(
-                                            Icons.history_rounded,
-                                          ),
-                                          label: Text(
-                                            material.historyButtonLabel(
-                                              _sessionHistory.length,
-                                            ),
-                                          ),
-                                        ),
-                                      ),
-                                    ],
                                   ),
                                   if (showStartPosttestButton) ...[
                                     const SizedBox(height: 8),
@@ -1240,7 +1284,13 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
                                         Icons.assignment_turned_in_outlined,
                                       ),
                                       label: Text(
-                                        material.startPosttestButtonLabel,
+                                        workspace
+                                                    ?.posttestTrigger
+                                                    ?.isGenerating ==
+                                                true
+                                            ? material
+                                                  .posttestGeneratingButtonLabel
+                                            : material.startPosttestButtonLabel,
                                       ),
                                     ),
                                   ],
@@ -1312,8 +1362,10 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
                                 onGenerateVideo: () {
                                   unawaited(_generateVideo());
                                 },
-                                onStartChat: () {
-                                  unawaited(_startLearningChat());
+                                onAcceptToolSuggestion: (suggestion) {
+                                  unawaited(
+                                    _generateVideo(suggestion: suggestion),
+                                  );
                                 },
                                 onOpenCanvas: _openCanvas,
                               ),
@@ -1325,17 +1377,21 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
                     _WorkspaceFooter(
                       controller: _messageController,
                       onSend: _sendMessage,
-                      onAdvancePhase: () {
+                      onConfirmPhase: () {
                         unawaited(_advancePhase());
                       },
-                      onGenerateVideo: () {
-                        unawaited(_generateVideo());
-                      },
-                      canAdvancePhase: canAdvancePhase,
+                      onStayInPhase: _stayInCurrentPhase,
+                      showPhaseCheckpoint: showPhaseCheckpoint,
+                      currentPhase: workspace?.currentPhase ?? 'engage',
+                      phaseCheckpointQuestion: phaseCheckpointQuestion,
                       isSending: _isAppendingEvent,
                       isPhaseSubmitting: _isPhaseSubmitting,
-                      isVideoGenerating: _isVideoGenerating,
-                      canGenerateVideo: _canGenerateVideoForCurrentTopic(),
+                      onOpenCanvas: _openCanvas,
+                      onAttachImage: _pickWorkspaceImage,
+                      onRemoveAttachment: _removePendingAttachment,
+                      pendingAttachmentBytes: _pendingAttachmentBytes,
+                      pendingAttachmentName: _pendingAttachmentName,
+                      isUploadingAttachment: _isUploadingAttachment,
                       copy: copy,
                       material: material,
                     ),
@@ -1360,18 +1416,9 @@ class _WorkspaceChatEntry {
     this.imageUrl,
     this.isDegraded = false,
     this.timestamp,
+    this.toolSuggestion,
   }) : snapshot = null,
        isSystemNote = false;
-
-  const _WorkspaceChatEntry.canvas(this.snapshot, {this.imageUrl})
-    : text = null,
-      isUser = true,
-      nextActions = const [],
-      evidenceRequest = null,
-      explanationCard = null,
-      isDegraded = false,
-      isSystemNote = false,
-      timestamp = null;
 
   /// A non-conversational marker in the transcript, e.g. "a video was requested
   /// here". Rendered centred and muted rather than as a chat bubble.
@@ -1383,7 +1430,8 @@ class _WorkspaceChatEntry {
       explanationCard = null,
       imageUrl = null,
       isDegraded = false,
-      isSystemNote = true;
+      isSystemNote = true,
+      toolSuggestion = null;
 
   final String? text;
   final bool isUser;
@@ -1395,150 +1443,11 @@ class _WorkspaceChatEntry {
   final bool isDegraded;
   final bool isSystemNote;
   final DateTime? timestamp;
+  final WorkspaceToolSuggestion? toolSuggestion;
 
   bool get isCanvas => snapshot != null;
   bool get hasStructuredTutorData =>
-      nextActions.isNotEmpty ||
-      (evidenceRequest?.isNotEmpty ?? false) ||
-      (explanationCard?.isNotEmpty ?? false);
-}
-
-class _WorkspaceHistorySheet extends StatelessWidget {
-  const _WorkspaceHistorySheet({
-    required this.sessions,
-    required this.activeSessionId,
-    required this.material,
-    required this.onDeleteSession,
-  });
-
-  final List<WorkspaceSessionSummary> sessions;
-  final String? activeSessionId;
-  final _LocalizedWorkspaceMaterial material;
-  final ValueChanged<String> onDeleteSession;
-
-  @override
-  Widget build(BuildContext context) {
-    return SafeArea(
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxHeight: 520),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 4, 20, 10),
-              child: Text(
-                material.chatHistoryTitle,
-                style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  color: WicaraColors.ink,
-                  fontWeight: FontWeight.w800,
-                ),
-              ),
-            ),
-            Flexible(
-              child: ListView.separated(
-                shrinkWrap: true,
-                itemCount: sessions.length,
-                separatorBuilder: (_, _) => const Divider(height: 1),
-                itemBuilder: (context, index) {
-                  final session = sessions[index];
-                  final isActive = session.id == activeSessionId;
-                  return ListTile(
-                    leading: Icon(
-                      isActive
-                          ? Icons.chat_bubble_rounded
-                          : Icons.chat_bubble_outline_rounded,
-                      color: isActive
-                          ? WicaraColors.primary
-                          : WicaraColors.muted,
-                    ),
-                    title: Text(
-                      material.historySessionTitle(session.title),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontWeight: FontWeight.w800),
-                    ),
-                    subtitle: Text(
-                      _historySubtitle(session),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    trailing: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        IconButton(
-                          icon: const Icon(Icons.delete_outline_rounded),
-                          tooltip: material.deleteSessionLabel,
-                          onPressed: () async {
-                            final confirmed = await showDialog<bool>(
-                              context: context,
-                              builder: (dialogContext) => AlertDialog(
-                                title: Text(material.deleteSessionLabel),
-                                content: Text(
-                                  material.deleteSessionConfirmBody,
-                                ),
-                                actions: [
-                                  TextButton(
-                                    onPressed: () =>
-                                        Navigator.of(dialogContext).pop(false),
-                                    child: Text(material.cancelLabel),
-                                  ),
-                                  FilledButton(
-                                    onPressed: () =>
-                                        Navigator.of(dialogContext).pop(true),
-                                    child: Text(material.deleteSessionLabel),
-                                  ),
-                                ],
-                              ),
-                            );
-                            if (confirmed == true && context.mounted) {
-                              Navigator.of(context).pop();
-                              onDeleteSession(session.id);
-                            }
-                          },
-                        ),
-                        Icon(
-                          isActive
-                              ? Icons.check_rounded
-                              : Icons.chevron_right_rounded,
-                        ),
-                      ],
-                    ),
-                    onTap: () => Navigator.of(context).pop(session.id),
-                  );
-                },
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  String _historySubtitle(WorkspaceSessionSummary session) {
-    final parts = <String>[];
-    if (session.preview.isNotEmpty) {
-      parts.add(session.preview);
-    }
-    final countLabel = material.historyMessageCountLabel(session.messageCount);
-    parts.add(countLabel);
-    final timeLabel = _compactDate(session.updatedAt);
-    if (timeLabel.isNotEmpty) {
-      parts.add(timeLabel);
-    }
-    return parts.join(' | ');
-  }
-
-  String _compactDate(String value) {
-    final parsed = DateTime.tryParse(value);
-    if (parsed == null) {
-      return '';
-    }
-    final local = parsed.toLocal();
-    final hour = local.hour.toString().padLeft(2, '0');
-    final minute = local.minute.toString().padLeft(2, '0');
-    return '${local.day}/${local.month} $hour:$minute';
-  }
+      (explanationCard?.isNotEmpty ?? false) || toolSuggestion != null;
 }
 
 class _LocalizedWorkspaceMaterial {
@@ -1555,7 +1464,8 @@ class _LocalizedWorkspaceMaterial {
   bool get isIndonesian => languageCode == 'id';
 
   /// BCP 47 tag for speech synthesis and recognition, which need a region.
-  String get speechLocale => OnboardingCopy.forLanguage(languageCode).speechLocale;
+  String get speechLocale =>
+      OnboardingCopy.forLanguage(languageCode).speechLocale;
 
   String _t(String key, {required String en, required String id}) {
     switch (languageCode) {
@@ -1589,18 +1499,6 @@ class _LocalizedWorkspaceMaterial {
 
   String get topicTitle =>
       _t('topicTitle', en: 'Learning topic', id: 'Topik pembelajaran');
-  String get startChatTitle =>
-      _t('startChatTitle', en: 'Start learning', id: 'Mulai sesi belajar');
-  String get startChatBody => _t(
-    'startChatBody',
-    en: 'The tutor will guide you from the diagnosis and learning phase stored by the backend.',
-    id: 'Tutor akan memandu dari diagnosis dan fase belajar yang tersimpan di backend.',
-  );
-  String get startChatButtonLabel => _t(
-    'startChatButtonLabel',
-    en: 'Start learning chat',
-    id: 'Mulai chat belajar',
-  );
   String get loadingDescription => _t(
     'loadingDescription',
     en: 'Connecting this module to the backend learning context.',
@@ -1614,7 +1512,8 @@ class _LocalizedWorkspaceMaterial {
 
   String get workspaceTitleLabel =>
       _t('workspaceTitleLabel', en: 'Workspace', id: 'Ruang belajar');
-  String get newChatLabel => _t('newChatLabel', en: 'New chat', id: 'Chat baru');
+  String get newChatLabel =>
+      _t('newChatLabel', en: 'New chat', id: 'Chat baru');
   String get chatHistoryTitle =>
       _t('chatHistoryTitle', en: 'Chat history', id: 'Riwayat chat');
   String get advancePhaseLabel =>
@@ -1626,8 +1525,32 @@ class _LocalizedWorkspaceMaterial {
   );
   String get phaseTransitionHint => _t(
     'phaseTransitionHint',
-    en: "Tap 'Advance phase' when you are ready.",
-    id: "Tekan 'Lanjut fase' kalau sudah paham.",
+    en: 'This phase is complete. Keep learning here until you are ready.',
+    id: 'Fase ini selesai. Tetap belajar di sini sampai kamu siap.',
+  );
+
+  String phaseCheckpointFallback({
+    required String topic,
+    required String learnerEvidence,
+  }) {
+    final evidence = learnerEvidence.length <= 96
+        ? learnerEvidence
+        : '${learnerEvidence.substring(0, 93)}...';
+    return _tf(
+      'phaseCheckpointPrompt',
+      en: 'Thinking about your response “$evidence” on $topic, does that match what you understand now?',
+      id: 'Dari jawabanmu “$evidence” tentang $topic, apakah itu sudah sesuai dengan pemahamanmu sekarang?',
+      args: [evidence, topic],
+    );
+  }
+
+  String get confirmPhaseLabel => _t('confirmPhaseLabel', en: 'Yes', id: 'Iya');
+  String get stayInPhaseLabel =>
+      _t('stayInPhaseLabel', en: 'Not yet', id: 'Belum');
+  String get stayInPhaseMessage => _t(
+    'stayInPhaseMessage',
+    en: 'Not yet, I still need help with this part.',
+    id: 'Belum, bagian ini masih belum jelas buat saya.',
   );
 
   /// The 5E phase names are kept untranslated on purpose — they are the
@@ -1660,6 +1583,16 @@ class _LocalizedWorkspaceMaterial {
     'posttestUnavailableMessage',
     en: 'The posttest is not ready yet. Continue with the tutor guidance.',
     id: 'Posttest belum siap. Lanjutkan sesuai arahan tutor.',
+  );
+  String get posttestGeneratingButtonLabel => _t(
+    'posttestGeneratingButtonLabel',
+    en: 'Preparing posttest...',
+    id: 'Menyiapkan posttest...',
+  );
+  String get posttestGenerationDelayedMessage => _t(
+    'posttestGenerationDelayedMessage',
+    en: 'Posttest generation is still running. You can leave and resume this workspace later.',
+    id: 'Posttest masih dibuat. Kamu bisa keluar dan melanjutkan workspace ini nanti.',
   );
   String get workspaceNotReadyMessage => _t(
     'workspaceNotReadyMessage',
@@ -1752,6 +1685,18 @@ class _LocalizedWorkspaceMaterial {
     en: 'Video generation failed.',
     id: 'Pembuatan video gagal.',
   );
+  String get visualOnlyExploreMessage => _t(
+    'visualOnlyExploreMessage',
+    en: 'Visualizations can only be generated during Explore.',
+    id: 'Visualisasi hanya dapat dibuat saat fase Explore.',
+  );
+  String get visualSuggestionLabel =>
+      _t('visualSuggestionLabel', en: 'Visual support', id: 'Bantuan visual');
+  String get acceptVisualSuggestionLabel => _t(
+    'acceptVisualSuggestionLabel',
+    en: 'Generate visualization',
+    id: 'Buat visualisasi',
+  );
   String get retryGenerateVideoLabel => _t(
     'retryGenerateVideoLabel',
     en: 'Retry generate video',
@@ -1819,8 +1764,6 @@ class _LocalizedWorkspaceMaterial {
     en: 'Evidence requested',
     id: 'Bukti yang diminta',
   );
-  String get nextActionsLabel =>
-      _t('nextActionsLabel', en: 'Next actions', id: 'Aksi berikutnya');
 
   String canvasSnapshotSentLabel(Object? count) {
     if (count == null) {
@@ -1895,6 +1838,18 @@ class _LocalizedWorkspaceMaterial {
     args: [message],
   );
 
+  String get imageUnreadableMessage => _t(
+    'imageUnreadableMessage',
+    en: 'The image file could not be read.',
+    id: 'File gambar tidak dapat dibaca.',
+  );
+
+  String get imageTooLargeMessage => _t(
+    'imageTooLargeMessage',
+    en: 'The image must be 10 MB or smaller.',
+    id: 'Ukuran gambar maksimal 10 MB.',
+  );
+
   String get resumingVideoMessage => _t(
     'resumingVideoMessage',
     en: 'Re-attaching to the render in progress...',
@@ -1960,11 +1915,8 @@ class _LocalizedWorkspaceMaterial {
     args: [level],
   );
 
-  String get whyThisModuleLabel => _t(
-    'whyThisModuleLabel',
-    en: 'Why this module?',
-    id: 'Kenapa modul ini?',
-  );
+  String get whyThisModuleLabel =>
+      _t('whyThisModuleLabel', en: 'Why this module?', id: 'Kenapa modul ini?');
 
   String get deleteSessionLabel =>
       _t('deleteSessionLabel', en: 'Delete session', id: 'Hapus sesi');
@@ -2016,7 +1968,7 @@ class _WorkspaceChatPanel extends StatelessWidget {
     required this.videoErrorMessage,
     required this.canGenerateVideo,
     required this.onGenerateVideo,
-    required this.onStartChat,
+    required this.onAcceptToolSuggestion,
     required this.onOpenCanvas,
     required this.tutorDegraded,
     required this.hintLevel,
@@ -2045,7 +1997,7 @@ class _WorkspaceChatPanel extends StatelessWidget {
   final String? videoErrorMessage;
   final bool canGenerateVideo;
   final VoidCallback onGenerateVideo;
-  final VoidCallback onStartChat;
+  final ValueChanged<WorkspaceToolSuggestion> onAcceptToolSuggestion;
   final VoidCallback onOpenCanvas;
   final bool tutorDegraded;
   final int hintLevel;
@@ -2100,15 +2052,6 @@ class _WorkspaceChatPanel extends StatelessWidget {
             _WorkspaceSyncNotice(
               icon: Icons.sync_rounded,
               text: material.savingEvidenceMessage,
-            ),
-          ],
-          if (!isLoadingWorkspace &&
-              workspaceError == null &&
-              chatEntries.isEmpty) ...[
-            const SizedBox(height: 14),
-            _WorkspaceStartChatCard(
-              material: material,
-              onStartChat: onStartChat,
             ),
           ],
           const SizedBox(height: 14),
@@ -2171,8 +2114,10 @@ class _WorkspaceChatPanel extends StatelessWidget {
                       const SizedBox(height: 8),
                       _StructuredTutorData(
                         explanationCard: entry.explanationCard,
-                        evidenceRequest: entry.evidenceRequest,
-                        nextActions: entry.nextActions,
+                        toolSuggestion: entry.toolSuggestion,
+                        canAcceptToolSuggestion:
+                            canGenerateVideo && !isVideoGenerating,
+                        onAcceptToolSuggestion: onAcceptToolSuggestion,
                         material: material,
                       ),
                     ],
@@ -2678,20 +2623,21 @@ class _WorkspaceBubble extends StatelessWidget {
 class _StructuredTutorData extends StatelessWidget {
   const _StructuredTutorData({
     required this.explanationCard,
-    required this.evidenceRequest,
-    required this.nextActions,
+    required this.toolSuggestion,
+    required this.canAcceptToolSuggestion,
+    required this.onAcceptToolSuggestion,
     required this.material,
   });
 
   final Map<String, dynamic>? explanationCard;
-  final Map<String, dynamic>? evidenceRequest;
-  final List<String> nextActions;
+  final WorkspaceToolSuggestion? toolSuggestion;
+  final bool canAcceptToolSuggestion;
+  final ValueChanged<WorkspaceToolSuggestion> onAcceptToolSuggestion;
   final _LocalizedWorkspaceMaterial material;
 
   @override
   Widget build(BuildContext context) {
     final hasExplanationCard = explanationCard?.isNotEmpty ?? false;
-    final hasEvidenceRequest = evidenceRequest?.isNotEmpty ?? false;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -2702,20 +2648,81 @@ class _StructuredTutorData extends StatelessWidget {
             data: explanationCard!,
             color: WicaraColors.primary,
           ),
-        if (hasExplanationCard && hasEvidenceRequest) const SizedBox(height: 8),
-        if (hasEvidenceRequest)
-          _StructuredTutorCard(
-            icon: Icons.fact_check_outlined,
-            title: material.evidenceRequestLabel,
-            data: evidenceRequest!,
-            color: WicaraColors.secondary,
-          ),
-        if ((hasExplanationCard || hasEvidenceRequest) &&
-            nextActions.isNotEmpty)
+        if (hasExplanationCard && toolSuggestion != null)
           const SizedBox(height: 8),
-        if (nextActions.isNotEmpty)
-          _TutorNextActions(actions: nextActions, material: material),
+        if (toolSuggestion case final suggestion?)
+          _TutorToolSuggestionCard(
+            suggestion: suggestion,
+            material: material,
+            enabled: canAcceptToolSuggestion,
+            onAccept: () => onAcceptToolSuggestion(suggestion),
+          ),
       ],
+    );
+  }
+}
+
+class _TutorToolSuggestionCard extends StatelessWidget {
+  const _TutorToolSuggestionCard({
+    required this.suggestion,
+    required this.material,
+    required this.enabled,
+    required this.onAccept,
+  });
+
+  final WorkspaceToolSuggestion suggestion;
+  final _LocalizedWorkspaceMaterial material;
+  final bool enabled;
+  final VoidCallback onAccept;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: WicaraColors.primary.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: WicaraColors.primary.withValues(alpha: 0.22)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 11, 12, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(
+                  Icons.auto_awesome_outlined,
+                  size: 17,
+                  color: WicaraColors.primary,
+                ),
+                const SizedBox(width: 7),
+                Text(
+                  material.visualSuggestionLabel,
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                    color: WicaraColors.ink,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 7),
+            Text(
+              suggestion.prompt,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: WicaraColors.text,
+                fontWeight: FontWeight.w600,
+                height: 1.35,
+              ),
+            ),
+            const SizedBox(height: 10),
+            OutlinedButton.icon(
+              onPressed: enabled ? onAccept : null,
+              icon: const Icon(Icons.smart_display_rounded),
+              label: Text(material.acceptVisualSuggestionLabel),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -2823,46 +2830,6 @@ class _StructuredTutorValue extends StatelessWidget {
         fontWeight: FontWeight.w600,
         height: 1.35,
       ),
-    );
-  }
-}
-
-class _TutorNextActions extends StatelessWidget {
-  const _TutorNextActions({required this.actions, required this.material});
-
-  final List<String> actions;
-  final _LocalizedWorkspaceMaterial material;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(
-          material.nextActionsLabel,
-          style: Theme.of(context).textTheme.labelMedium?.copyWith(
-            color: WicaraColors.secondaryDeep,
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-        const SizedBox(height: 6),
-        Wrap(
-          spacing: 6,
-          runSpacing: 6,
-          children: [
-            for (final action in actions)
-              Chip(
-                avatar: const Icon(Icons.arrow_forward_rounded, size: 15),
-                label: Text(action),
-                backgroundColor: WicaraColors.secondarySoft,
-                side: BorderSide(
-                  color: WicaraColors.secondary.withValues(alpha: 0.24),
-                ),
-                visualDensity: VisualDensity.compact,
-              ),
-          ],
-        ),
-      ],
     );
   }
 }
@@ -3901,43 +3868,6 @@ class _GeneratedVideoChip extends StatelessWidget {
   }
 }
 
-class _WorkspaceStartChatCard extends StatelessWidget {
-  const _WorkspaceStartChatCard({
-    required this.material,
-    required this.onStartChat,
-  });
-
-  final _LocalizedWorkspaceMaterial material;
-  final VoidCallback onStartChat;
-
-  @override
-  Widget build(BuildContext context) {
-    return _WorkspaceRichBubble(
-      icon: Icons.auto_awesome_rounded,
-      title: material.startChatTitle,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            material.startChatBody,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-              color: WicaraColors.text,
-              fontWeight: FontWeight.w600,
-              height: 1.35,
-            ),
-          ),
-          const SizedBox(height: 12),
-          FilledButton.icon(
-            onPressed: onStartChat,
-            icon: const Icon(Icons.chat_bubble_outline_rounded),
-            label: Text(material.startChatButtonLabel),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _CanvasSnapshotBubble extends StatelessWidget {
   const _CanvasSnapshotBubble({required this.snapshot, required this.material});
 
@@ -4187,26 +4117,38 @@ class _WorkspaceFooter extends StatelessWidget {
   const _WorkspaceFooter({
     required this.controller,
     required this.onSend,
-    required this.onAdvancePhase,
-    required this.onGenerateVideo,
-    required this.canAdvancePhase,
+    required this.onConfirmPhase,
+    required this.onStayInPhase,
+    required this.showPhaseCheckpoint,
+    required this.currentPhase,
+    required this.phaseCheckpointQuestion,
     required this.isSending,
     required this.isPhaseSubmitting,
-    required this.isVideoGenerating,
-    required this.canGenerateVideo,
+    required this.onOpenCanvas,
+    required this.onAttachImage,
+    required this.onRemoveAttachment,
+    required this.pendingAttachmentBytes,
+    required this.pendingAttachmentName,
+    required this.isUploadingAttachment,
     required this.copy,
     required this.material,
   });
 
   final TextEditingController controller;
   final VoidCallback onSend;
-  final VoidCallback onAdvancePhase;
-  final VoidCallback onGenerateVideo;
-  final bool canAdvancePhase;
+  final VoidCallback onConfirmPhase;
+  final VoidCallback onStayInPhase;
+  final bool showPhaseCheckpoint;
+  final String currentPhase;
+  final String phaseCheckpointQuestion;
   final bool isSending;
   final bool isPhaseSubmitting;
-  final bool isVideoGenerating;
-  final bool canGenerateVideo;
+  final VoidCallback onOpenCanvas;
+  final VoidCallback onAttachImage;
+  final VoidCallback onRemoveAttachment;
+  final Uint8List? pendingAttachmentBytes;
+  final String? pendingAttachmentName;
+  final bool isUploadingAttachment;
   final OnboardingCopy copy;
   final _LocalizedWorkspaceMaterial material;
 
@@ -4230,60 +4172,90 @@ class _WorkspaceFooter extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: canAdvancePhase && !isPhaseSubmitting
-                        ? onAdvancePhase
-                        : null,
-                    icon: Icon(
-                      isPhaseSubmitting
-                          ? Icons.hourglass_bottom_rounded
-                          : Icons.skip_next_rounded,
-                    ),
-                    label: Text(
-                      isPhaseSubmitting
-                          ? material.advancingPhaseLabel
-                          : material.advancePhaseLabel,
-                    ),
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size.fromHeight(44),
-                      padding: const EdgeInsets.symmetric(horizontal: 10),
-                    ),
-                  ),
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 220),
+              transitionBuilder: (child, animation) => FadeTransition(
+                opacity: animation,
+                child: SizeTransition(
+                  sizeFactor: animation,
+                  axisAlignment: 1,
+                  child: child,
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: FilledButton.icon(
-                    onPressed: !isVideoGenerating && canGenerateVideo
-                        ? onGenerateVideo
-                        : null,
-                    icon: Icon(
-                      isVideoGenerating
-                          ? Icons.hourglass_bottom_rounded
-                          : Icons.smart_display_rounded,
+              ),
+              child: showPhaseCheckpoint
+                  ? Padding(
+                      key: ValueKey('phase-checkpoint-$currentPhase'),
+                      padding: const EdgeInsets.only(bottom: 10),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Text(
+                            phaseCheckpointQuestion,
+                            textAlign: TextAlign.center,
+                            style: Theme.of(context).textTheme.bodyMedium
+                                ?.copyWith(fontWeight: FontWeight.w700),
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: OutlinedButton(
+                                  onPressed: onStayInPhase,
+                                  child: Text(material.stayInPhaseLabel),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: FilledButton(
+                                  onPressed: onConfirmPhase,
+                                  child: Text(material.confirmPhaseLabel),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    )
+                  : const SizedBox.shrink(
+                      key: ValueKey('phase-checkpoint-hidden'),
                     ),
-                    label: Text(
-                      isVideoGenerating
-                          ? material.generatingVideoButtonLabel
-                          : material.generateVideoFromChatLabel,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size.fromHeight(44),
-                      padding: const EdgeInsets.symmetric(horizontal: 10),
-                    ),
-                  ),
-                ),
-              ],
             ),
-            const SizedBox(height: 8),
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 180),
+              child: isPhaseSubmitting
+                  ? Padding(
+                      key: const ValueKey('automatic-phase-transition'),
+                      padding: const EdgeInsets.only(bottom: 8),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const SizedBox.square(
+                            dimension: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                          const SizedBox(width: 9),
+                          Text(
+                            material.advancingPhaseLabel,
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(fontWeight: FontWeight.w700),
+                          ),
+                        ],
+                      ),
+                    )
+                  : const SizedBox.shrink(
+                      key: ValueKey('automatic-phase-idle'),
+                    ),
+            ),
             _WorkspaceComposerInput(
               controller: controller,
               onSend: onSend,
               isSending: isSending,
+              onOpenCanvas: onOpenCanvas,
+              onAttachImage: onAttachImage,
+              onRemoveAttachment: onRemoveAttachment,
+              pendingAttachmentBytes: pendingAttachmentBytes,
+              pendingAttachmentName: pendingAttachmentName,
+              isUploadingAttachment: isUploadingAttachment,
               copy: copy,
             ),
           ],
@@ -4298,6 +4270,12 @@ class _WorkspaceComposerInput extends StatelessWidget {
     required this.controller,
     required this.onSend,
     required this.isSending,
+    required this.onOpenCanvas,
+    required this.onAttachImage,
+    required this.onRemoveAttachment,
+    required this.pendingAttachmentBytes,
+    required this.pendingAttachmentName,
+    required this.isUploadingAttachment,
     required this.copy,
   });
 
@@ -4307,6 +4285,12 @@ class _WorkspaceComposerInput extends StatelessWidget {
   /// Blocks a second submit while one is in flight: two concurrent appends
   /// collide on the server's per-session event index.
   final bool isSending;
+  final VoidCallback onOpenCanvas;
+  final VoidCallback onAttachImage;
+  final VoidCallback onRemoveAttachment;
+  final Uint8List? pendingAttachmentBytes;
+  final String? pendingAttachmentName;
+  final bool isUploadingAttachment;
   final OnboardingCopy copy;
 
   @override
@@ -4314,8 +4298,70 @@ class _WorkspaceComposerInput extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (pendingAttachmentBytes != null) ...[
+          Container(
+            margin: const EdgeInsets.only(bottom: 8),
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: WicaraColors.fieldFill,
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: WicaraColors.secondaryLight),
+            ),
+            child: Row(
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(8),
+                  child: Image.memory(
+                    pendingAttachmentBytes!,
+                    height: 52,
+                    width: 68,
+                    fit: BoxFit.cover,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    pendingAttachmentName ?? copy.uploadWorkImageLabel,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  tooltip: 'Remove attachment',
+                  onPressed: isSending || isUploadingAttachment
+                      ? null
+                      : onRemoveAttachment,
+                  icon: const Icon(Icons.close_rounded),
+                ),
+              ],
+            ),
+          ),
+        ],
         Row(
           children: [
+            IconButton(
+              tooltip: copy.canvasLabel,
+              onPressed: isSending || isUploadingAttachment
+                  ? null
+                  : onOpenCanvas,
+              icon: const Icon(Icons.draw_rounded),
+            ),
+            IconButton(
+              tooltip: copy.uploadWorkImageLabel,
+              onPressed: isSending || isUploadingAttachment
+                  ? null
+                  : onAttachImage,
+              icon: isUploadingAttachment
+                  ? const SizedBox(
+                      height: 18,
+                      width: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.image_outlined),
+            ),
             Expanded(
               child: TextField(
                 controller: controller,

@@ -16,6 +16,7 @@ import '../../../core/widgets/gradient_button.dart';
 import '../../../core/widgets/language_chip.dart';
 import '../../../core/widgets/speech_controls.dart';
 import '../../auth/application/auth_controller.dart';
+import '../../auth/domain/auth_repository.dart';
 import '../../curriculum/domain/curriculum_models.dart';
 import '../../curriculum/domain/curriculum_repository.dart';
 import '../../learning_goal/domain/learning_goal_repository.dart';
@@ -36,6 +37,9 @@ import '../../analytics/presentation/insights_page.dart';
 import '../../review/domain/review_models.dart';
 import '../../review/presentation/flag_review_button.dart';
 import '../../review/presentation/review_queue_page.dart';
+import '../../teacher_students/domain/teacher_student_models.dart';
+import '../../teacher_students/presentation/student_teacher_connections_page.dart';
+import '../../teacher_students/presentation/teacher_dashboard_page.dart';
 import '../../workspace/domain/workspace_models.dart';
 import '../../../core/localization/wicara_copy_scope.dart';
 
@@ -95,6 +99,7 @@ class AppHomePage extends StatefulWidget {
     required this.onboardingController,
     this.reviewRepository,
     this.analyticsRepository,
+    this.teacherStudentRepository,
     this.routeArguments,
     super.key,
   });
@@ -106,6 +111,7 @@ class AppHomePage extends StatefulWidget {
   final OnboardingController onboardingController;
   final ReviewRepository? reviewRepository;
   final AnalyticsRepository? analyticsRepository;
+  final TeacherStudentRepository? teacherStudentRepository;
   final Object? routeArguments;
 
   @override
@@ -194,14 +200,78 @@ class _AppHomePageState extends State<AppHomePage> {
     );
   }
 
+  void _openTeacherDashboard() {
+    final repo = widget.teacherStudentRepository;
+    if (repo == null) {
+      return;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => TeacherDashboardPage(
+          repository: repo,
+          reviewRepository: widget.reviewRepository,
+        ),
+      ),
+    );
+  }
+
+  void _openTeacherConnections() {
+    final repo = widget.teacherStudentRepository;
+    if (repo == null) {
+      return;
+    }
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => StudentTeacherConnectionsPage(repository: repo),
+      ),
+    );
+  }
+
+  Future<void> _signOutTeacher() async {
+    await widget.authController.signOut();
+    if (!mounted) {
+      return;
+    }
+    Navigator.of(
+      context,
+    ).pushNamedAndRemoveUntil(AppRoutes.landing, (route) => false);
+  }
+
   Widget? _homeFab() {
-    if (_isTeacher && widget.reviewRepository != null) {
+    if (_isTeacher && widget.teacherStudentRepository != null) {
       return FloatingActionButton.extended(
         backgroundColor: WicaraColors.primaryDeep,
         foregroundColor: Colors.white,
-        icon: const Icon(Icons.rate_review_outlined),
-        label: Text(_copy.teacherReviewLabel),
-        onPressed: _openTeacherReview,
+        icon: const Icon(Icons.groups_outlined),
+        label: const Text('Students'),
+        onPressed: _openTeacherDashboard,
+      );
+    }
+    if (widget.teacherStudentRepository != null) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          if (widget.analyticsRepository != null) ...[
+            FloatingActionButton.small(
+              heroTag: 'home-insights',
+              tooltip: _copy.insightsLabel,
+              backgroundColor: WicaraColors.secondaryDeep,
+              foregroundColor: Colors.white,
+              onPressed: _openInsights,
+              child: const Icon(Icons.insights_outlined),
+            ),
+            const SizedBox(height: 8),
+          ],
+          FloatingActionButton.extended(
+            heroTag: 'home-teacher-connections',
+            backgroundColor: WicaraColors.primaryDeep,
+            foregroundColor: Colors.white,
+            icon: const Icon(Icons.supervisor_account_outlined),
+            label: const Text('My teachers'),
+            onPressed: _openTeacherConnections,
+          ),
+        ],
       );
     }
     if (widget.analyticsRepository != null) {
@@ -470,8 +540,10 @@ class _AppHomePageState extends State<AppHomePage> {
     }
   }
 
-  void _resumePretest() {
-    Navigator.of(context).pushNamed(AppRoutes.pretest);
+  Future<void> _resumePretest() async {
+    await Navigator.of(context).pushNamed(AppRoutes.pretest);
+    if (!mounted) return;
+    _retryHomeSnapshot();
   }
 
   Future<void> _syncOnboardingProfileFromSnapshot(HomeSnapshot snapshot) async {
@@ -708,8 +780,10 @@ class _AppHomePageState extends State<AppHomePage> {
     setState(() => _showKnowledgeMap = false);
   }
 
-  void _openLearningGoal() {
-    Navigator.of(context).pushNamed(AppRoutes.learningGoal);
+  Future<void> _openLearningGoal() async {
+    await Navigator.of(context).pushNamed(AppRoutes.learningGoal);
+    if (!mounted) return;
+    _retryHomeSnapshot();
   }
 
   Future<void> _openWorkspaceModules(WorkspaceRouteArguments arguments) async {
@@ -723,6 +797,7 @@ class _AppHomePageState extends State<AppHomePage> {
       _lastPosttestTrackId = result.trackId;
       _lastPosttestModuleId = result.moduleId;
       _openPosttest(
+        posttestSessionId: result.posttestSessionId,
         workspaceSessionId: result.workspaceSessionId,
         trackId: result.trackId,
         moduleId: result.moduleId,
@@ -731,6 +806,7 @@ class _AppHomePageState extends State<AppHomePage> {
   }
 
   Future<void> _openPosttest({
+    String? posttestSessionId,
     String? workspaceSessionId,
     String? trackId,
     String? moduleId,
@@ -760,17 +836,24 @@ class _AppHomePageState extends State<AppHomePage> {
           : workspaceSessionId;
       final resolvedTrackId = trackId ?? _lastPosttestTrackId;
       final resolvedModuleId = moduleId ?? _lastPosttestModuleId;
-      final session = await widget.homeRepository.startPosttest(
-        workspaceSessionId: resolvedWorkspaceSessionId,
-        trackId:
-            resolvedWorkspaceSessionId == null && resolvedTrackId.isNotEmpty
-            ? resolvedTrackId
-            : null,
-        moduleId:
-            resolvedWorkspaceSessionId == null && resolvedModuleId.isNotEmpty
-            ? resolvedModuleId
-            : null,
-      );
+      final resolvedPosttestSessionId = (posttestSessionId ?? '').isEmpty
+          ? null
+          : posttestSessionId;
+      final session = resolvedPosttestSessionId != null
+          ? await widget.homeRepository.fetchPosttest(
+              sessionId: resolvedPosttestSessionId,
+            )
+          : await widget.homeRepository.startPosttest(
+              workspaceSessionId: resolvedWorkspaceSessionId,
+              trackId:
+                  resolvedWorkspaceSessionId == null && resolvedTrackId.isNotEmpty
+                  ? resolvedTrackId
+                  : null,
+              moduleId:
+                  resolvedWorkspaceSessionId == null && resolvedModuleId.isNotEmpty
+                  ? resolvedModuleId
+                  : null,
+            );
       if (!mounted) {
         return;
       }
@@ -840,11 +923,14 @@ class _AppHomePageState extends State<AppHomePage> {
       if (!mounted) {
         return;
       }
+      final refreshedSnapshot = widget.homeRepository.fetchSnapshot();
       setState(() {
         _isSubmittingPosttest = false;
         _posttestResult = result;
         _showPosttest = false;
         _showPosttestResult = true;
+        _homeSnapshotFuture = refreshedSnapshot;
+        _activeGoalFuture = _fetchActiveGoal();
       });
     } catch (error) {
       if (!mounted) {
@@ -911,6 +997,16 @@ class _AppHomePageState extends State<AppHomePage> {
 
   @override
   Widget build(BuildContext context) {
+    final teacherStudentRepository = widget.teacherStudentRepository;
+    if (widget.authController.session?.role == AuthRole.teacher &&
+        teacherStudentRepository != null) {
+      return TeacherDashboardPage(
+        repository: teacherStudentRepository,
+        reviewRepository: widget.reviewRepository,
+        onSignOut: _signOutTeacher,
+      );
+    }
+
     return AnimatedBuilder(
       animation: widget.onboardingController,
       builder: (context, _) {
@@ -919,7 +1015,10 @@ class _AppHomePageState extends State<AppHomePage> {
         );
 
         return Scaffold(
-          floatingActionButton: _homeFab(),
+          floatingActionButton: Padding(
+            padding: const EdgeInsets.only(bottom: 78),
+            child: _homeFab(),
+          ),
           body: _HomeCopyScope(
             copy: copy,
             child: SafeArea(
@@ -7218,7 +7317,8 @@ class _ProfilePage extends StatelessWidget {
             const SizedBox(height: 28),
             _ProfileHeaderCard(
               snapshot: snapshot,
-              roleLabel: copy.learnerLabel,
+              roleLabel:
+                  authController.session?.role.label ?? copy.learnerLabel,
             ),
             const SizedBox(height: 22),
             _ProfileSection(
