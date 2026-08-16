@@ -1854,6 +1854,8 @@ bukan definisi konsep umum.''',
       _t('noGeneratedVideosReadyYetLabel', en: 'No generated videos are ready yet.', id: 'Belum ada video yang selesai dibuat.');
   String get videosFromBackendJobsSavedLabel =>
       _t('videosFromBackendJobsSavedLabel', en: 'Videos from backend jobs are saved here.', id: 'Video dari job backend tersimpan di sini.');
+  String get bundledTemplatePackLabel =>
+      _t('bundledTemplatePackLabel', en: 'Template pack · bundled in the app', id: 'Paket template · tersimpan di aplikasi');
   String get noDailyEvaluationAssignedYetLabel =>
       _t('noDailyEvaluationAssignedYetLabel', en: 'No daily evaluation assigned yet.', id: 'Belum ada evaluasi harian yang ditugaskan.');
   String get noEvaluationLabel =>

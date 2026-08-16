@@ -806,6 +806,7 @@ const copyMs = <String, String>{
   'createChooseAnotherGoalStartLabel': 'Cipta atau pilih matlamat lain untuk mula belajar.',
   'noGeneratedVideosReadyYetLabel': 'Belum ada video yang dijana sedia.',
   'videosFromBackendJobsSavedLabel': 'Video daripada kerja backend disimpan di sini.',
+  'bundledTemplatePackLabel': 'Pek templat · tersimpan dalam aplikasi',
   'noDailyEvaluationAssignedYetLabel': 'Belum ada penilaian harian yang ditugaskan.',
   'noEvaluationLabel': 'Tiada penilaian',
   'answerConfidenceLevelLabel': 'Tahap keyakinan jawapan',

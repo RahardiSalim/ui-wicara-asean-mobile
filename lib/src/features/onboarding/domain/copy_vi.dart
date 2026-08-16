@@ -805,6 +805,7 @@ const copyVi = <String, String>{
   'createChooseAnotherGoalStartLabel': 'Hãy tạo hoặc chọn mục tiêu khác để bắt đầu học.',
   'noGeneratedVideosReadyYetLabel': 'Chưa có video nào được tạo xong.',
   'videosFromBackendJobsSavedLabel': 'Video từ các tác vụ backend được lưu tại đây.',
+  'bundledTemplatePackLabel': 'Bộ mẫu · đã có sẵn trong ứng dụng',
   'noDailyEvaluationAssignedYetLabel': 'Chưa có bài đánh giá hằng ngày nào được giao.',
   'noEvaluationLabel': 'Không có đánh giá',
   'answerConfidenceLevelLabel': 'Mức độ tự tin về câu trả lời',

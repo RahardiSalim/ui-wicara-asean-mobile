@@ -806,6 +806,7 @@ const copyFil = <String, String>{
   'createChooseAnotherGoalStartLabel': 'Gumawa o pumili ng ibang layunin para magsimulang matuto.',
   'noGeneratedVideosReadyYetLabel': 'Wala pang handang nabuong video.',
   'videosFromBackendJobsSavedLabel': 'Dito nase-save ang mga video mula sa backend jobs.',
+  'bundledTemplatePackLabel': 'Template pack · nakalagay na sa app',
   'noDailyEvaluationAssignedYetLabel': 'Wala pang naka-assign na daily evaluation.',
   'noEvaluationLabel': 'Walang pagsusuri',
   'answerConfidenceLevelLabel': 'Antas ng kumpiyansa sa sagot',

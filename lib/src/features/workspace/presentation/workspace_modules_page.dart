@@ -7,6 +7,7 @@ import 'package:video_player/video_player.dart';
 import '../../../core/localization/wicara_copy_scope.dart';
 
 import '../../../core/accessibility/speech_accessibility_scope.dart';
+import '../../../core/media/video_source.dart';
 import '../../../core/network/api_client.dart';
 import '../../../core/theme/wicara_colors.dart';
 import '../../../core/widgets/speech_controls.dart';
@@ -3481,9 +3482,7 @@ class _WorkspaceVideoPlayerDialogState
 
   Future<void> _initialize() async {
     try {
-      final controller = VideoPlayerController.networkUrl(
-        Uri.parse(widget.videoUrl),
-      );
+      final controller = createVideoController(widget.videoUrl);
       await controller.initialize();
       final requestedPosition = widget.initialPosition;
       if (requestedPosition != null && requestedPosition > Duration.zero) {

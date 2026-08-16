@@ -8,6 +8,8 @@ import 'package:video_player/video_player.dart';
 
 import '../../../app/app_routes.dart';
 import '../../../core/accessibility/speech_accessibility_scope.dart';
+import '../../../core/media/bundled_video_library.dart';
+import '../../../core/media/video_source.dart';
 import '../../../core/theme/wicara_colors.dart';
 import '../../../core/utils/learning_level_resolver.dart';
 import '../../../core/widgets/gradient_button.dart';
@@ -2309,6 +2311,12 @@ class _BackendGalleryContent extends StatelessWidget {
     final items = snapshot.mediaArtifacts
         .where((item) => item.isReady)
         .toList(growable: false);
+    // The bundled template pack sits under whatever the backend has rendered,
+    // so the gallery is never empty — including on a device that has never
+    // reached the backend at all.
+    final bundled = BundledVideoLibrary.videos
+        .map(_artifactFromBundledVideo)
+        .toList(growable: false);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -2364,9 +2372,44 @@ class _BackendGalleryContent extends StatelessWidget {
           _BackendGalleryArtifactCard(artifact: items[index]),
           const SizedBox(height: 14),
         ],
+        Padding(
+          padding: const EdgeInsets.fromLTRB(4, 2, 4, 12),
+          child: Text(
+            copy.bundledTemplatePackLabel,
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: WicaraColors.muted,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.2,
+            ),
+          ),
+        ),
+        for (var index = 0; index < bundled.length; index++) ...[
+          _BackendGalleryArtifactCard(artifact: bundled[index]),
+          const SizedBox(height: 14),
+        ],
       ],
     );
   }
+}
+
+/// Presents a bundled clip as the same artifact the gallery renders for a
+/// backend render, so both go through one card and one player.
+HomeMediaArtifact _artifactFromBundledVideo(BundledVideo video) {
+  return HomeMediaArtifact(
+    id: video.id,
+    title: video.title,
+    // The card and the detail sheet both render the duration themselves;
+    // repeating it here just wrapped the subtitle onto a second line.
+    subtitle: video.subject,
+    status: 'ready',
+    durationSeconds: video.seconds,
+    durationLabel: video.durationLabel,
+    transcript: video.transcript,
+    notes: const [],
+    artifactType: 'video',
+    videoUrl: video.assetPath,
+    playbackUrl: video.assetPath,
+  );
 }
 
 class _BackendGalleryArtifactCard extends StatelessWidget {
@@ -2524,7 +2567,7 @@ class _GalleryArtifactDetailDialogState
       return;
     }
     try {
-      final controller = VideoPlayerController.networkUrl(Uri.parse(videoUrl));
+      final controller = createVideoController(videoUrl);
       await controller.initialize();
       final requestedPosition = widget.initialPosition;
       if (requestedPosition != null && requestedPosition > Duration.zero) {

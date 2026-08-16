@@ -801,6 +801,7 @@ const copyTh = <String, String>{
   'createChooseAnotherGoalStartLabel': 'สร้างหรือเลือกเป้าหมายอื่นเพื่อเริ่มเรียน',
   'noGeneratedVideosReadyYetLabel': 'ยังไม่มีวิดีโอที่สร้างเสร็จ',
   'videosFromBackendJobsSavedLabel': 'วิดีโอจากงานฝั่งแบ็กเอนด์จะถูกบันทึกไว้ที่นี่',
+  'bundledTemplatePackLabel': 'ชุดเทมเพลต · มาพร้อมในแอป',
   'noDailyEvaluationAssignedYetLabel': 'ยังไม่มีการประเมินประจำวันที่ได้รับมอบหมาย',
   'noEvaluationLabel': 'ไม่มีการประเมิน',
   'answerConfidenceLevelLabel': 'ระดับความมั่นใจในคำตอบ',

@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:video_player/video_player.dart';
 
 import '../localization/wicara_copy_scope.dart';
+import '../media/video_source.dart';
 
 class HardcodedVideoPreview extends StatelessWidget {
   const HardcodedVideoPreview({
@@ -110,8 +111,7 @@ class _HardcodedVideoNativePageState extends State<_HardcodedVideoNativePage> {
   void initState() {
     super.initState();
     _lockLandscape();
-    _controller = VideoPlayerController.networkUrl(Uri.parse(widget.videoUrl))
-      ..setLooping(true);
+    _controller = createVideoController(widget.videoUrl)..setLooping(true);
     _initializeController();
   }
 
