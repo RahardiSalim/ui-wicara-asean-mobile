@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 
 import '../../../app/app_routes.dart';
 import '../../../core/theme/wicara_colors.dart';
+import '../../../core/widgets/generation_progress_view.dart';
 import '../../../core/widgets/gradient_button.dart';
 import '../../../core/widgets/speech_controls.dart';
 import '../../onboarding/application/onboarding_controller.dart';
@@ -343,10 +344,40 @@ class _PretestPageState extends State<PretestPage> {
       );
     }
     if (_isLoadingQuestion) {
-      return _PretestStateView(
-        constraints: constraints,
-        title: copy.loadingPretestLabel,
-        message: copy.preparingAdaptiveQuestionsLabel,
+      return GenerationProgressView(
+        title: copy.pretestBuildingTitle,
+        subtitle: copy.pretestBuildingSubtitle,
+        heroAsset: 'lib/src/assets/pretestIcon.png',
+        expectedDuration: const Duration(seconds: 120),
+        footnote: copy.pretestBuildingFootnote,
+        tips: copy.pretestBuildingTips,
+        stages: [
+          GenerationStage(
+            label: copy.pretestBuildingStageGoal,
+            icon: Icons.flag_rounded,
+            weight: 1,
+          ),
+          GenerationStage(
+            label: copy.pretestBuildingStageMap,
+            icon: Icons.hub_rounded,
+            weight: 1.5,
+          ),
+          GenerationStage(
+            label: copy.pretestBuildingStageWrite,
+            icon: Icons.edit_note_rounded,
+            weight: 4,
+          ),
+          GenerationStage(
+            label: copy.pretestBuildingStageCheck,
+            icon: Icons.fact_check_rounded,
+            weight: 2,
+          ),
+          GenerationStage(
+            label: copy.pretestBuildingStageFinish,
+            icon: Icons.auto_awesome_rounded,
+            weight: 1,
+          ),
+        ],
       );
     }
     if (_questionError != null || _question == null) {
