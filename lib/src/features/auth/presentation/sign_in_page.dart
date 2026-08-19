@@ -3,7 +3,6 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-import '../../../core/localization/wicara_copy_scope.dart';
 
 import '../../../app/app_routes.dart';
 import '../../../core/theme/wicara_colors.dart';
@@ -43,7 +42,6 @@ class _SignInPageState extends State<SignInPage> {
   bool _isPasswordHidden = true;
   bool _isSubmitting = false;
 
-  bool get _showDevelopmentBypass => kDebugMode;
 
   @override
   void dispose() {
@@ -152,44 +150,6 @@ class _SignInPageState extends State<SignInPage> {
         setState(() => _isSubmitting = false);
       }
     }
-  }
-
-  Future<void> _continueWithDevelopmentBypass({
-    required bool onboardingCompleted,
-  }) async {
-    setState(() => _isSubmitting = true);
-    try {
-      final session = await widget.authController.startDevelopmentSession(
-        role: _role,
-        displayName: _mode == _AuthMode.register
-            ? _nameController.text
-            : _emailController.text,
-        onboardingCompleted: onboardingCompleted,
-      );
-      widget.onboardingController.syncDisplayName(session.displayName);
-      if (!mounted) {
-        return;
-      }
-      _openNextRoute(session);
-    } finally {
-      if (mounted) {
-        setState(() => _isSubmitting = false);
-      }
-    }
-  }
-
-  Future<void> _openDevelopmentBypassOptions() async {
-    final option = await showModalBottomSheet<_DevBypassTarget>(
-      context: context,
-      showDragHandle: true,
-      builder: (context) => const _DevBypassSheet(),
-    );
-    if (option == null) {
-      return;
-    }
-    await _continueWithDevelopmentBypass(
-      onboardingCompleted: option == _DevBypassTarget.home,
-    );
   }
 
   Future<void> _showPasswordResetDialog() async {
@@ -603,15 +563,6 @@ class _SignInPageState extends State<SignInPage> {
                                       onWebCredential:
                                           _continueWithGoogleIdToken,
                                     ),
-                                    // if (_showDevelopmentBypass) ...[
-                                    //   const SizedBox(height: 14),
-                                    //   // _DevelopmentBypassButton(
-                                    //   //   label: 'Dev Mode',
-                                    //   //   onPressed: _isSubmitting
-                                    //   //       ? null
-                                    //   //       : _openDevelopmentBypassOptions,
-                                    //   // ),
-                                    // ],
                                     const SizedBox(height: 40),
                                     SecurityNote(
                                       message: copy.securityNoteLabel,
@@ -810,94 +761,6 @@ class _DividerText extends StatelessWidget {
         ),
         const Expanded(child: Divider(color: WicaraColors.line)),
       ],
-    );
-  }
-}
-
-enum _DevBypassTarget { onboarding, home }
-
-class _DevBypassSheet extends StatelessWidget {
-  const _DevBypassSheet();
-
-  @override
-  Widget build(BuildContext context) {
-    final copy = WicaraCopyScope.of(context);
-    return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 4, 20, 20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              copy.devBypassTitle,
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                fontSize: 20,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              copy.devBypassSubtitle,
-              style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                color: WicaraColors.muted,
-                fontWeight: FontWeight.w500,
-              ),
-            ),
-            const SizedBox(height: 16),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.flag_outlined),
-              title: Text(copy.startAtOnboardingLabel),
-              subtitle: Text(copy.devOnboardingIncompleteLabel),
-              onTap: () =>
-                  Navigator.of(context).pop(_DevBypassTarget.onboarding),
-            ),
-            ListTile(
-              contentPadding: EdgeInsets.zero,
-              leading: const Icon(Icons.home_outlined),
-              title: Text(copy.jumpToHomeLabel),
-              subtitle: Text(copy.devSignedInLabel),
-              onTap: () => Navigator.of(context).pop(_DevBypassTarget.home),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _DevelopmentBypassButton extends StatelessWidget {
-  const _DevelopmentBypassButton({
-    required this.label,
-    required this.onPressed,
-  });
-
-  final String label;
-  final VoidCallback? onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    return SizedBox(
-      width: double.infinity,
-      height: 47,
-      child: TextButton(
-        onPressed: onPressed,
-        style: TextButton.styleFrom(
-          foregroundColor: WicaraColors.secondaryDeep,
-          backgroundColor: WicaraColors.secondarySoft,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(11),
-          ),
-        ),
-        child: Text(
-          label,
-          style: Theme.of(context).textTheme.labelLarge?.copyWith(
-            color: WicaraColors.secondaryDeep,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-      ),
     );
   }
 }
