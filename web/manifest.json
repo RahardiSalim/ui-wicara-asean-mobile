@@ -1,11 +1,11 @@
 {
-    "name": "wicara_mobile",
-    "short_name": "wicara_mobile",
+    "name": "Wicara",
+    "short_name": "Wicara",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "background_color": "#F4F8FF",
+    "theme_color": "#76ACFF",
+    "description": "Tutor adaptif yang mulai dari prasyarat, dengan alur belajar 5E.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [
