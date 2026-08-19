@@ -94,6 +94,37 @@ grep '^storePassword=' android/key.properties | cut -d= -f2- | tr -d '\n' \
 The build fails loudly if `WICARA_KEYSTORE_BASE64` is missing, rather than
 silently falling back to the debug key.
 
+### If Actions will not run
+
+As of v1.0.0 the workflow cannot run at all: every job dies in a few seconds
+with *"The job was not started because your account is locked due to a billing
+issue."* This hits public repos too, where Actions minutes are normally free.
+Until the `RahardiSalim` account's billing is cleared — or the repo is moved to
+`anthef`, the way the backend repo was — releases have to be built and uploaded
+by hand:
+
+```bash
+flutter build apk --release \
+  --target-platform android-arm,android-arm64 \
+  --dart-define=WICARA_API_BASE_URL=https://ui-wicara-asean-be.vercel.app \
+  --build-name=1.0.1 --build-number=2
+
+# Never skip this: it is the check that caught the v1-signing bug.
+"$ANDROID_HOME"/build-tools/*/apksigner verify --min-sdk-version 23 --print-certs \
+  build/app/outputs/flutter-apk/app-release.apk
+
+cp build/app/outputs/flutter-apk/app-release.apk /tmp/wicara-1.0.1.apk
+gh release create v1.0.1 /tmp/wicara-1.0.1.apk --repo RahardiSalim/ui-wicara-asean-mobile
+```
+
+Local builds need `JAVA_HOME` pointed at a JDK 17 — `brew install openjdk@17`
+puts one at `/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home`,
+which is *not* where `/usr/libexec/java_home` looks.
+
+Building by hand means `versionCode` no longer comes from the CI run number, so
+bump it yourself on every release. Android refuses to install an update whose
+`versionCode` is not higher than the installed one.
+
 ### Cutting a release
 
 ```bash
