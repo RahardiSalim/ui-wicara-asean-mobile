@@ -14,10 +14,19 @@ class ApiClient {
 
   static const defaultBaseUrl = String.fromEnvironment(
     'WICARA_API_BASE_URL',
-    defaultValue: 'http://127.0.0.1:8000',
+    defaultValue: 'https://ui-wicara-asean-be.vercel.app',
   );
 
   static const defaultPostTimeout = Duration(minutes: 3);
+
+  /// Reads and mutations against the deployed backend, which is a serverless
+  /// function in iad1 talking to Supabase in ap-southeast-1. Measured there:
+  /// `/health` 0.6s, `/api/v1/subjects` 1.3s warm but 8.5s on a cold start,
+  /// and `/api/v1/knowledge-map` 5.8-6.5s every time for its 1.7 MB payload.
+  /// The old 4s and 8s literals were sized for a backend on localhost and
+  /// timed out against every one of those.
+  static const defaultGetTimeout = Duration(seconds: 30);
+  static const defaultMutationTimeout = Duration(seconds: 30);
 
   /// Production builds must provide WICARA_API_BASE_URL explicitly. Silently
   /// replacing a configured URL made local auth call a stale deployment.
@@ -49,7 +58,7 @@ class ApiClient {
     final mergedHeaders = <String, String>{..._buildHeaders(), ...?headers};
     final response = await _httpClient
         .get(uri, headers: mergedHeaders)
-        .timeout(const Duration(seconds: 4));
+        .timeout(defaultGetTimeout);
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw ApiClientException(
@@ -174,7 +183,7 @@ class ApiClient {
     };
     final response = await _httpClient
         .put(uri, headers: mergedHeaders, body: jsonEncode(body ?? const {}))
-        .timeout(const Duration(seconds: 8));
+        .timeout(defaultMutationTimeout);
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw ApiClientException(
@@ -205,7 +214,7 @@ class ApiClient {
     };
     final response = await _httpClient
         .patch(uri, headers: mergedHeaders, body: jsonEncode(body ?? const {}))
-        .timeout(const Duration(seconds: 8));
+        .timeout(defaultMutationTimeout);
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw ApiClientException(
@@ -233,7 +242,7 @@ class ApiClient {
     final mergedHeaders = <String, String>{..._buildHeaders(), ...?headers};
     final response = await _httpClient
         .delete(uri, headers: mergedHeaders)
-        .timeout(const Duration(seconds: 8));
+        .timeout(defaultMutationTimeout);
 
     if (response.statusCode < 200 || response.statusCode >= 300) {
       throw ApiClientException(
