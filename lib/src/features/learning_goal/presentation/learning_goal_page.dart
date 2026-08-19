@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../../app/app_routes.dart';
 import '../../../core/theme/wicara_colors.dart';
+import '../../../core/widgets/generation_progress_view.dart';
 import '../../../core/widgets/gradient_button.dart';
 import '../../../core/widgets/speech_controls.dart';
 import '../../onboarding/application/onboarding_controller.dart';
@@ -538,6 +539,32 @@ class _LearningGoalPageState extends State<LearningGoalPage> {
                 final horizontalPadding = constraints.maxWidth < 360
                     ? 18.0
                     : 28.0;
+
+                if (_isGenerating && _resolution == null) {
+                  return GenerationProgressView(
+                    title: copy.goalResolvingTitle,
+                    subtitle: copy.goalResolvingSubtitle,
+                    heroAsset: 'lib/src/assets/learnIcon.png',
+                    expectedDuration: const Duration(seconds: 40),
+                    stages: [
+                      GenerationStage(
+                        label: copy.goalResolvingStageRead,
+                        icon: Icons.edit_rounded,
+                        weight: 1,
+                      ),
+                      GenerationStage(
+                        label: copy.goalResolvingStageSearch,
+                        icon: Icons.travel_explore_rounded,
+                        weight: 2,
+                      ),
+                      GenerationStage(
+                        label: copy.goalResolvingStageMatch,
+                        icon: Icons.check_circle_outline_rounded,
+                        weight: 1,
+                      ),
+                    ],
+                  );
+                }
 
                 if (_resolution != null && !_isComplete) {
                   return _ResolvedLearningGoalLayout(

@@ -1082,6 +1082,16 @@ class OnboardingCopy {
       _t('loadingPretestLabel', en: 'Loading pretest', id: 'Memuat pretest');
   String get preparingAdaptiveQuestionsLabel =>
       _t('preparingAdaptiveQuestionsLabel', en: 'Preparing adaptive questions...', id: 'Menyiapkan soal adaptif...');
+  String get goalResolvingTitle =>
+      _t('goalResolvingTitle', en: 'Finding the right concept', id: 'Mencari konsep yang tepat');
+  String get goalResolvingSubtitle =>
+      _t('goalResolvingSubtitle', en: 'We are matching what you typed against the\ncurriculum map.', id: 'Kami sedang mencocokkan yang kamu tulis\ndengan peta kurikulum.');
+  String get goalResolvingStageRead =>
+      _t('goalResolvingStageRead', en: 'Reading what you want to learn', id: 'Membaca apa yang ingin kamu pelajari');
+  String get goalResolvingStageSearch =>
+      _t('goalResolvingStageSearch', en: 'Searching the curriculum map', id: 'Menelusuri peta kurikulum');
+  String get goalResolvingStageMatch =>
+      _t('goalResolvingStageMatch', en: 'Choosing the closest concept', id: 'Memilih konsep yang paling cocok');
   String get pretestBuildingTitle =>
       _t('pretestBuildingTitle', en: 'Building your pretest', id: 'Menyiapkan pretesmu');
   String get pretestBuildingSubtitle =>
