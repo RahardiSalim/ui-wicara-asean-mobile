@@ -1092,6 +1092,16 @@ class OnboardingCopy {
       _t('goalResolvingStageSearch', en: 'Searching the curriculum map', id: 'Menelusuri peta kurikulum');
   String get goalResolvingStageMatch =>
       _t('goalResolvingStageMatch', en: 'Choosing the closest concept', id: 'Memilih konsep yang paling cocok');
+  String get answerCheckingTitle =>
+      _t('answerCheckingTitle', en: 'Checking your answer', id: 'Memeriksa jawabanmu');
+  String get answerCheckingSubtitle =>
+      _t('answerCheckingSubtitle', en: 'The tutor is reading your reasoning, not just\nthe option you picked.', id: 'Tutor sedang membaca alasanmu, bukan hanya\npilihan yang kamu tandai.');
+  String get answerCheckingStageRead =>
+      _t('answerCheckingStageRead', en: 'Reading your reasoning', id: 'Membaca alasanmu');
+  String get answerCheckingStageReason =>
+      _t('answerCheckingStageReason', en: 'Weighing what you already understand', id: 'Menimbang apa yang sudah kamu pahami');
+  String get answerCheckingStageNext =>
+      _t('answerCheckingStageNext', en: 'Choosing what to ask next', id: 'Memilih pertanyaan berikutnya');
   String get pretestBuildingTitle =>
       _t('pretestBuildingTitle', en: 'Building your pretest', id: 'Menyiapkan pretesmu');
   String get pretestBuildingSubtitle =>

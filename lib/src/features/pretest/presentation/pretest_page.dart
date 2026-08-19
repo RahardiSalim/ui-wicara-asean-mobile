@@ -57,6 +57,7 @@ class _PretestPageState extends State<PretestPage> {
   PretestQuestion? _question;
   String _selectedOptionId = '';
   bool _isSubmitting = false;
+  bool _isEvaluatingAnswer = false;
   bool _isUploadingEvidence = false;
   bool _isLoadingQuestion = true;
   String? _questionError;
@@ -207,7 +208,10 @@ class _PretestPageState extends State<PretestPage> {
     if (_isSubmitting) {
       return;
     }
-    setState(() => _isSubmitting = true);
+    setState(() {
+      _isSubmitting = true;
+      _isEvaluatingAnswer = true;
+    });
     try {
       final result = await widget.pretestRepository.submitAnswer(
         PretestAnswer(
@@ -253,7 +257,10 @@ class _PretestPageState extends State<PretestPage> {
       _showMessage(error.message);
     } finally {
       if (mounted) {
-        setState(() => _isSubmitting = false);
+        setState(() {
+          _isSubmitting = false;
+          _isEvaluatingAnswer = false;
+        });
       }
     }
   }
@@ -343,6 +350,35 @@ class _PretestPageState extends State<PretestPage> {
         onContinue: _isSubmitting ? () {} : _selectPathAndGoHome,
       );
     }
+    if (_isEvaluatingAnswer) {
+      return GenerationProgressView(
+        title: copy.answerCheckingTitle,
+        subtitle: copy.answerCheckingSubtitle,
+        heroAsset: 'lib/src/assets/pretestIcon.png',
+        // Measured against the live backend: evaluating one answer runs 20-85s,
+        // and the closing turn that also builds the diagnosis sits at the top
+        // of that range.
+        expectedDuration: const Duration(seconds: 60),
+        stages: [
+          GenerationStage(
+            label: copy.answerCheckingStageRead,
+            icon: Icons.menu_book_rounded,
+            weight: 1,
+          ),
+          GenerationStage(
+            label: copy.answerCheckingStageReason,
+            icon: Icons.psychology_alt_rounded,
+            weight: 2.5,
+          ),
+          GenerationStage(
+            label: copy.answerCheckingStageNext,
+            icon: Icons.route_rounded,
+            weight: 1.5,
+          ),
+        ],
+      );
+    }
+
     if (_isLoadingQuestion) {
       return GenerationProgressView(
         title: copy.pretestBuildingTitle,
