@@ -545,7 +545,9 @@ class _LearningGoalPageState extends State<LearningGoalPage> {
                     title: copy.goalResolvingTitle,
                     subtitle: copy.goalResolvingSubtitle,
                     heroAsset: 'lib/src/assets/learnIcon.png',
-                    expectedDuration: const Duration(seconds: 40),
+                    // Measured against the live backend: resolution is an LLM
+                    // round trip that lands around 85-90s, not a quick lookup.
+                    expectedDuration: const Duration(seconds: 90),
                     stages: [
                       GenerationStage(
                         label: copy.goalResolvingStageRead,
