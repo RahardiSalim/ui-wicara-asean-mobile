@@ -1082,6 +1082,23 @@ class OnboardingCopy {
       _t('loadingPretestLabel', en: 'Loading pretest', id: 'Memuat pretest');
   String get preparingAdaptiveQuestionsLabel =>
       _t('preparingAdaptiveQuestionsLabel', en: 'Preparing adaptive questions...', id: 'Menyiapkan soal adaptif...');
+  String get pretestBuildingTitle =>
+      _t('pretestBuildingTitle', en: 'Building your pretest', id: 'Menyiapkan pretesmu');
+  String get pretestBuildingSubtitle =>
+      _t('pretestBuildingSubtitle', en: 'We are writing questions that match your goal.\nThis usually takes about two minutes.', id: 'Kami sedang menyusun soal yang sesuai dengan tujuanmu.\nBiasanya butuh sekitar dua menit.');
+  String get pretestBuildingStageGoal =>
+      _t('pretestBuildingStageGoal', en: 'Reading your learning goal', id: 'Membaca tujuan belajarmu');
+  String get pretestBuildingStageMap =>
+      _t('pretestBuildingStageMap', en: 'Mapping the prerequisite concepts', id: 'Memetakan konsep prasyaratnya');
+  String get pretestBuildingStageWrite =>
+      _t('pretestBuildingStageWrite', en: 'Writing questions at each difficulty', id: 'Menulis soal untuk tiap tingkat kesulitan');
+  String get pretestBuildingStageCheck =>
+      _t('pretestBuildingStageCheck', en: 'Checking every answer and explanation', id: 'Memeriksa setiap jawaban dan pembahasan');
+  String get pretestBuildingStageFinish =>
+      _t('pretestBuildingStageFinish', en: 'Putting your pretest together', id: 'Merapikan pretesmu');
+  String get pretestBuildingFootnote =>
+      _t('pretestBuildingFootnote', en: 'Keep this screen open. Your questions are being written just for you.', id: 'Biarkan layar ini terbuka. Soalmu sedang ditulis khusus untukmu.');
+  List<String> get pretestBuildingTips => _tl('pretestBuildingTips', en: const ['A pretest is not a score. It finds the gap worth fixing first.', 'Answer honestly. A wrong answer teaches the tutor more than a lucky guess.', 'Stuck on a question? Choosing "not sure" is a real answer here.', 'Your results shape the whole learning path that comes next.'], id: const ['Pretest bukan nilai. Tujuannya menemukan celah yang paling perlu ditutup.', 'Jawab sejujurnya. Jawaban salah lebih membantu tutor daripada tebakan beruntung.', 'Bingung? Memilih "belum yakin" juga jawaban yang sah di sini.', 'Hasilnya menentukan seluruh jalur belajarmu setelah ini.']);
   String get pretestUnavailableLabel =>
       _t('pretestUnavailableLabel', en: 'Pretest unavailable', id: 'Pretest tidak tersedia');
   String get noLocalQuestionLabel =>
