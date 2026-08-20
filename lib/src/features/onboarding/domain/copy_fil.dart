@@ -758,6 +758,7 @@ const copyFil = <String, String>{
   'workspace.canvasMarksAttachedLabel': '{0} marka - may nakalakip na papel',
   'workspace.historyButtonLabel': 'Kasaysayan ({0})',
   'workspace.historyMessageCountLabel': '{0} mensahe',
+  'workspace.tutorStillAnsweringMessage': 'Sinasagot pa ng tutor ang naunang mensahe mo. Sandali lang.',
   'workspace.workspaceSyncFailedMessage': 'Nabigo ang workspace sync: {0}',
   'workspace.imageSentLabel': 'Naipadala ang larawan',
   'workspace.videoRequestedNote': 'May hiniling na video dito.',

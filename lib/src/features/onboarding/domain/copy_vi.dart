@@ -757,6 +757,7 @@ const copyVi = <String, String>{
   'workspace.canvasMarksAttachedLabel': '{0} nét - có đính kèm giấy',
   'workspace.historyButtonLabel': 'Lịch sử ({0})',
   'workspace.historyMessageCountLabel': '{0} tin nhắn',
+  'workspace.tutorStillAnsweringMessage': 'Gia sư vẫn đang trả lời tin nhắn trước của bạn. Chờ một chút nhé.',
   'workspace.workspaceSyncFailedMessage': 'Đồng bộ không gian làm việc thất bại: {0}',
   'workspace.imageSentLabel': 'Đã gửi ảnh',
   'workspace.videoRequestedNote': 'Đã yêu cầu một video tại đây.',

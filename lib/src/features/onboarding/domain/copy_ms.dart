@@ -758,6 +758,7 @@ const copyMs = <String, String>{
   'workspace.canvasMarksAttachedLabel': '{0} tanda - kertas dilampirkan',
   'workspace.historyButtonLabel': 'Sejarah ({0})',
   'workspace.historyMessageCountLabel': '{0} mesej',
+  'workspace.tutorStillAnsweringMessage': 'Tutor masih menjawab mesej anda sebelum ini. Tunggu sebentar.',
   'workspace.workspaceSyncFailedMessage': 'Penyegerakan ruang kerja gagal: {0}',
   'workspace.imageSentLabel': 'Imej dihantar',
   'workspace.videoRequestedNote': 'Video telah diminta di sini.',

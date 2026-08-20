@@ -1008,15 +1008,18 @@ class _WorkspaceModulesPageState extends State<WorkspaceModulesPage> {
       return true;
     } on WorkspaceException catch (error) {
       if (!mounted || _workspace?.id != workspace.id) return false;
+      // A turn already in flight is not a sync failure, and the backend's
+      // sentence is English. Say it in the learner's language instead of
+      // wrapping a server string in "sync failed".
+      final message = error.turnInProgress
+          ? _workspaceMaterial.tutorStillAnsweringMessage
+          : _workspaceMaterial.workspaceSyncFailedMessage(error.message);
       setState(() {
         _isAppendingEvent = false;
-        _workspaceError = error.message;
+        _workspaceError = message;
         _declinedPhaseTransition = null;
         _chatEntries.add(
-          _WorkspaceChatEntry.text(
-            text: _workspaceMaterial.workspaceSyncFailedMessage(error.message),
-            isUser: false,
-          ),
+          _WorkspaceChatEntry.text(text: message, isUser: false),
         );
       });
       return false;
@@ -1813,6 +1816,12 @@ class _LocalizedWorkspaceMaterial {
     en: count == 1 ? '1 message' : '$count messages',
     id: '$count pesan',
     args: [count],
+  );
+
+  String get tutorStillAnsweringMessage => _t(
+    'tutorStillAnsweringMessage',
+    en: 'The tutor is still answering your previous message. One moment.',
+    id: 'Tutor masih menjawab pesanmu sebelumnya. Tunggu sebentar ya.',
   );
 
   String workspaceSyncFailedMessage(String message) => _tf(

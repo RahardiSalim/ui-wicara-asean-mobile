@@ -227,7 +227,12 @@ class ApiWorkspaceRepository implements WorkspaceRepository {
       );
       return appendResultFromJson(json);
     } on ApiClientException catch (error) {
-      throw WorkspaceException(error.message);
+      // 409 here is the backend refusing a second turn while the tutor is
+      // still answering the first. That is a wait, not a sync failure.
+      throw WorkspaceException(
+        error.message,
+        turnInProgress: error.statusCode == 409,
+      );
     }
   }
 

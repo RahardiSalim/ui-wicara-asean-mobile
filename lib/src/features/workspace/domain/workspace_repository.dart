@@ -94,9 +94,13 @@ abstract class WorkspaceRepository {
 }
 
 class WorkspaceException implements Exception {
-  const WorkspaceException(this.message);
+  const WorkspaceException(this.message, {this.turnInProgress = false});
 
   final String message;
+
+  /// The backend rejected this because the tutor is still answering the
+  /// previous message in the same workspace. It is a wait, not a failure.
+  final bool turnInProgress;
 
   @override
   String toString() => message;

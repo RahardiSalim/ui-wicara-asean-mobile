@@ -107,7 +107,11 @@ class ApiClient {
         method: 'POST',
         uri: uri,
       );
-      throw ApiClientException(msg, detail: rawDetail);
+      throw ApiClientException(
+        msg,
+        detail: rawDetail,
+        statusCode: response.statusCode,
+      );
     }
 
     final decoded = jsonDecode(response.body);
@@ -158,7 +162,11 @@ class ApiClient {
         method: 'POST',
         uri: uri,
       );
-      throw ApiClientException(message, detail: rawDetail);
+      throw ApiClientException(
+        message,
+        detail: rawDetail,
+        statusCode: response.statusCode,
+      );
     }
     final decoded = jsonDecode(response.body);
     if (decoded is! Map<String, dynamic>) {
@@ -319,9 +327,14 @@ String _errorMessage(
 }) => _errorMessageAndDetail(response, method: method, uri: uri).$1;
 
 class ApiClientException implements Exception {
-  const ApiClientException(this.message, {this.detail});
+  const ApiClientException(this.message, {this.detail, this.statusCode});
 
   final String message;
+
+  /// HTTP status, when the failure came back from the server rather than from
+  /// the transport. Callers that need to tell one rejection from another —
+  /// 409 "already in flight" from a genuine 5xx — read this.
+  final int? statusCode;
 
   /// The raw JSON `detail` value parsed from the error response body.
   /// May be a [String], [Map], or `null`.

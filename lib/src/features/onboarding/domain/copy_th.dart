@@ -753,6 +753,7 @@ const copyTh = <String, String>{
   'workspace.canvasMarksAttachedLabel': '{0} รอย - แนบกระดาษแล้ว',
   'workspace.historyButtonLabel': 'ประวัติ ({0})',
   'workspace.historyMessageCountLabel': '{0} ข้อความ',
+  'workspace.tutorStillAnsweringMessage': 'ติวเตอร์กำลังตอบข้อความก่อนหน้าของคุณอยู่ รอสักครู่นะ',
   'workspace.workspaceSyncFailedMessage': 'ซิงก์พื้นที่ทำงานไม่สำเร็จ: {0}',
   'workspace.imageSentLabel': 'ส่งรูปภาพแล้ว',
   'workspace.videoRequestedNote': 'มีการขอวิดีโอที่นี่',
